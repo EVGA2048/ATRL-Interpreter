@@ -1,0 +1,29 @@
+# Development log
+
+## 0.4.1 — 2026-11-25
+
+- API failures no longer trigger a fresh request for every queued segment: transient failures use a 15-second cooldown, HTTP 429 defaults to 30 seconds and respects numeric Retry-After (bounded to 1–300 seconds); authentication/configuration errors wait for settings save or configuration change.
+- Only approved terms matching the current text or three preceding segments enter the cloud glossary prompt, at most 24 entries.
+- Audio level updates limited to roughly 12.5 Hz; recognition overload and decoding warnings remain visible separately from normal recording status.
+- Ignore typed translation results if text or target changed while the request was in flight.
+- Four JVM tests cover the 60-second grouping boundary, confirmed and relevant term selection, credential changes and API retry intervals.
+- Debug APK built successfully. No ADB device connected during this revision; no new device validation.
+
+## 0.4.0
+
+- Continuous chronological transcript, provisional gray text, paired local/cloud translations, fixed controls, scroll following and one-minute grouping based on audio timestamps.
+- Whisper repeated decoding is opportunistic: preview work runs when the ASR queue is idle. Final VAD segments are decoded independently; previews may be skipped on slower hardware.
+- Offline and cloud live translation run on independent serial workers.
+- Grouped glossary with language/category filtering, searchable examples and confirmation workflow.
+- Installed on Huawei P30 Pro and launched successfully. Recognition quality and latency not benchmarked.
+
+## 0.3.0
+
+- Replaced demo homepage with functional tabs; removed repeated titles and debug captions.
+- Upgraded to sherpa-onnx 2.0.3 and multilingual Whisper Base INT8 with zh/en/ru language candidates.
+- Fixed target selector to display the resolved target language rather than the internal Auto mode.
+- Installed on Huawei P30 Pro and launched.
+
+## 0.2.0 / 0.1.0
+
+- Initial Compose UI, microphone capture, encrypted credentials, local recognition, ML Kit, DeepSeek enhancement, session summaries, glossary, TTS and foreground microphone service.
