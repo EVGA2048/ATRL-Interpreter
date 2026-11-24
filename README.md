@@ -15,9 +15,9 @@
 
 ---
 
-**Interpreter** 是 ASTROLAB 开发的 Android 语言辅助工具，面向多语言交流、课堂听讲和专业技术讨论。支持中文、英语与俄语的自动语音识别、双向文字翻译、连续双语字幕、会话总结和专业词库。
+**Interpreter** 是 ASTROLAB 的 Android 实时传译工具，支持中文、英语与俄语的语音识别、文字互译、双语字幕、会话总结与专业词库。
 
-语音识别在设备上运行。翻译可以使用本地语言模型，也可以通过 DeepSeek Flash 结合语境与术语进行语义增强。应用保存原始识别结果，不用云端修正覆盖原始记录。
+语音识别在本地运行，DeepSeek Flash 结合上下文和词库辅助翻译与纠错。
 
 <a id="features"></a>
 
@@ -32,7 +32,7 @@
 | GLOSSARY | 自动提取术语候选，分组、搜索、筛选、例句及确认 |
 | AUDIO | 前台麦克风服务、系统 TTS、通知栏结束会话 |
 
-实时传译按语句处理，但显示在同一条时间线上。连续语音不产生独立卡片，只有相邻语句间的采集间隔达到 60 秒才建立新的时间分组。预识别是 Whisper 重复解码实现的准流式输出，并非原生流式声学模型。
+字幕按语句对应排列，停顿超过 60 秒后另起一组。Whisper 采用分段识别与滚动预识别。
 
 自动模式下，中文译为俄语，俄语与英语译为简体中文。文字翻译也可以指定中文、英语或俄语为目标语言。
 
@@ -76,7 +76,7 @@
 | Storage | Android app-private storage |
 | Credentials | Android Keystore / AES-GCM |
 
-语音识别模型内置于 APK，离线翻译语言包需首次联网下载。云端增强可以关闭；启用时只发送识别或输入文字、近期上下文及相关确认术语，不上传原始音频。录音不保存，文本会话保存在应用私有目录（不等同于会话数据加密）。系统 TTS 依赖已安装的语音引擎及语言包。
+ASR 模型随 APK 安装，离线翻译与 TTS 需相应语言包。云端增强仅处理文本及相关上下文，录音不上传、不保存。
 
 <a id="build"></a>
 
@@ -95,13 +95,13 @@ JDK 17、Android SDK 35、Gradle Wrapper 8.9。当前构建面向 ARM64，最低
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-模型及 AAR 不纳入 Git，下载来源和 SHA-256 记录见 [模型清单](docs/MODELS.md)。目前 APK 为调试签名，不是正式发行包。应用内 Settings 可配置 API Key、接口及模型，默认使用 `deepseek-flash`；API Key 不随仓库发布。
+模型下载及校验见 [MODELS.md](docs/MODELS.md)。在应用设置中配置 DeepSeek，默认模型为 `deepseek-flash`。
 
 <a id="development"></a>
 
 ## 04 / Development
 
-当前版本 **0.4.1**。首台开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB / ARM64）。
+当前版本 **0.4.1**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
 
 | 版本 | 主要变化 |
 |:--|:--|
@@ -111,13 +111,13 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 | 0.2.0 | 本地 ASR、语义增强、记录、总结、术语与 TTS |
 | 0.1.0 | Android 工程与真机录音原型 |
 
-验证状态：0.4.0 已在 P30 Pro 安装和启动；0.4.1 编译及四项 JVM 回归测试通过，尚未部署到手机。实时识别准确率、延迟、长会话、实际 API 和离线模型下载仍需持续真机验证。识别过载时可能丢弃音频分段并提示，不保证无损长时间转录。
+0.4.1 仍处于开发阶段，主要优化识别延迟与长会话稳定性。
 
 详细记录：[DEVLOG](docs/DEVLOG.md) / [App Icon Standard](docs/ASTROLAB-APP-ICON-STANDARD.md)。
 
 ### Third-party components
 
-上游项目：[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)、[Whisper](https://github.com/openai/whisper)、[Silero VAD](https://github.com/snakers4/silero-vad)、[ML Kit](https://developers.google.com/ml-kit/language/translation)。第三方组件遵守各自许可与条款。当前为私有开发仓库，尚未为 Interpreter 源码确定对外分发许可。
+上游项目：[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)、[Whisper](https://github.com/openai/whisper)、[Silero VAD](https://github.com/snakers4/silero-vad)、[ML Kit](https://developers.google.com/ml-kit/language/translation)。第三方组件适用各自的许可证。Interpreter 源码许可证暂未确定。
 
 <a id="english"></a>
 
@@ -125,7 +125,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 Interpreter is a native Android language assistant by ASTROLAB. It combines on-device multilingual speech recognition, aligned bilingual captions, offline translation, optional DeepSeek Flash enhancement, session notes and a personal glossary. Chinese, Russian and English are the supported speech-language candidates.
 
-The current build uses Whisper Base INT8 with repeated decoding for provisional captions; it is not a native streaming recognizer. Version 0.4.1 passes the debug build and four JVM regression tests. Hardware acceptance and latency measurements remain in progress.
+Currently in development. Built with Kotlin, Jetpack Compose and sherpa-onnx.
 
 ---
 

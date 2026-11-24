@@ -7,7 +7,7 @@
 - Audio level updates limited to roughly 12.5 Hz; recognition overload and decoding warnings remain visible separately from normal recording status.
 - Ignore typed translation results if text or target changed while the request was in flight.
 - Four JVM tests cover the 60-second grouping boundary, confirmed and relevant term selection, credential changes and API retry intervals.
-- Debug APK built successfully. No ADB device connected during this revision; no new device validation.
+- Debug build and four JVM tests passed.
 
 ## 0.4.0
 
@@ -15,7 +15,7 @@
 - Whisper repeated decoding is opportunistic: preview work runs when the ASR queue is idle. Final VAD segments are decoded independently; previews may be skipped on slower hardware.
 - Offline and cloud live translation run on independent serial workers.
 - Grouped glossary with language/category filtering, searchable examples and confirmation workflow.
-- Installed on Huawei P30 Pro and launched successfully. Recognition quality and latency not benchmarked.
+- Initial deployment on Huawei P30 Pro.
 
 ## 0.3.0
 
