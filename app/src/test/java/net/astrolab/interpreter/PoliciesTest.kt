@@ -124,4 +124,10 @@ class PoliciesTest {
         assertEquals(audio.size,spans.last().end)
         assertTrue(languageSpans(audio,listOf(LanguageProbe(4800,"zh"),LanguageProbe(8800,"zh"),LanguageProbe(12800,"en"),LanguageProbe(16800,"zh"),LanguageProbe(20800,"zh"))).isEmpty())
     }
+    @Test fun swipeRevealsAndClosesDeleteAction(){
+        assertFalse(shouldRevealDelete(-15f,100f,0f))
+        assertTrue(shouldRevealDelete(-60f,100f,0f))
+        assertTrue(shouldRevealDelete(-10f,100f,-800f))
+        assertFalse(shouldRevealDelete(-90f,100f,800f))
+    }
 }

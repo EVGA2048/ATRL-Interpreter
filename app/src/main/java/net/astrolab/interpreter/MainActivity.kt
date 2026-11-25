@@ -16,6 +16,14 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import kotlin.math.roundToInt
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
@@ -827,8 +835,19 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun canDeleteSession(id:Long)=current?.takeIf{recording||finishing}?.time!=id&&summaryBusy!=id
+    private fun deleteSession(id:Long){
+        if(!canDeleteSession(id))return
+        sessions=sessions.filterNot{it.time==id}
+        archive.saveSessions(sessions)
+        if(current?.time==id)current=null
+        if(viewed==id)viewed=null
+    }
     @Composable private fun NotesPage(){
         val scheme=MaterialTheme.colorScheme
+        var opened by remember{mutableStateOf<Long?>(null)}
+        var confirming by remember{mutableStateOf<Long?>(null)}
+        fun close(){opened=null;confirming=null}
         if(sessions.isEmpty()){
             Column(Modifier.fillMaxWidth().padding(top=55.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(14.dp)){
                 NavGlyph("notes",scheme.onSurfaceVariant.copy(alpha=.6f),Modifier.size(42.dp))
@@ -842,16 +861,59 @@ class MainActivity : ComponentActivity() {
             Surface(shape=RoundedCornerShape(16.dp),color=scheme.surface){
                 Column(Modifier.fillMaxWidth()){
                     entries.forEachIndexed{i,session->
-                        if(i>0)HorizontalDivider(Modifier.padding(start=16.dp),color=scheme.outline.copy(alpha=.45f))
-                        Row(Modifier.fillMaxWidth().clickable{viewed=session.time;navigate("detail")}.padding(horizontal=16.dp,vertical=15.dp),verticalAlignment=Alignment.CenterVertically){
-                            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(5.dp)){
-                                Text(timeLabel(session.time),fontSize=17.sp,fontWeight=FontWeight.Medium)
-                                Text(session.summary.ifBlank{session.items.firstOrNull()?.translated?.ifBlank{session.items.first().raw}.orEmpty()}.ifBlank{"${session.items.size} 段语音"},fontSize=14.sp,color=scheme.onSurfaceVariant,maxLines=2,overflow=TextOverflow.Ellipsis)
-                            }
-                            Text("›",fontSize=24.sp,color=scheme.onSurfaceVariant,modifier=Modifier.padding(start=12.dp))
+                        key(session.time){
+                            if(i>0)HorizontalDivider(Modifier.padding(start=16.dp),color=scheme.outline.copy(alpha=.45f))
+                            SwipeSessionRow(session,opened==session.time,confirming==session.time,canDeleteSession(session.time),
+                                onOpen={if(opened!=session.time){opened=session.time;confirming=null}},
+                                onClose={if(opened==session.time)close()},
+                                onTap={if(opened!=null)close() else {viewed=session.time;navigate("detail")}},
+                                onDelete={if(canDeleteSession(session.time)){
+                                    if(confirming==session.time){deleteSession(session.time);close()}
+                                    else {opened=session.time;confirming=session.time}
+                                }})
                         }
                     }
                 }
+            }
+        }
+    }
+    @Composable private fun SwipeSessionRow(session:Session,open:Boolean,confirm:Boolean,enabled:Boolean,
+        onOpen:()->Unit,onClose:()->Unit,onTap:()->Unit,onDelete:()->Unit){
+        val scheme=MaterialTheme.colorScheme
+        val density=LocalDensity.current
+        val actionWidth=if(confirm)124.dp else 86.dp
+        val widthPx=with(density){actionWidth.toPx()}
+        var dragging by remember{mutableStateOf(false)}
+        var dragOffset by remember{mutableFloatStateOf(0f)}
+        val animated by animateFloatAsState(
+            if(dragging)dragOffset else if(open&&enabled)-widthPx else 0f,
+            if(dragging)snap() else tween(220),label="session reveal")
+        val offset=if(dragging)dragOffset else animated
+        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(0.dp))){
+            Box(Modifier.matchParentSize(),contentAlignment=Alignment.CenterEnd){
+                if(offset<-.5f||open){
+                    Box(Modifier.width(actionWidth).fillMaxHeight().background(if(confirm)Color(0xFFB4232D) else Color(0xFFD83B42))
+                        .clickable(enabled=enabled&&open,onClick=onDelete),contentAlignment=Alignment.Center){
+                        Text(if(confirm)"确认删除" else "删除",color=Color.White,fontSize=14.sp,fontWeight=FontWeight.Medium)
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth().offset{IntOffset(offset.roundToInt(),0)}.background(scheme.surface)
+                .draggable(rememberDraggableState{delta->dragOffset=(dragOffset+delta).coerceIn(-widthPx,0f)},
+                    orientation=Orientation.Horizontal,enabled=enabled,
+                    onDragStarted={dragOffset=animated;dragging=true},
+                    onDragStopped={velocity->
+                        val reveal=shouldRevealDelete(dragOffset,widthPx,velocity)
+                        if(reveal)onOpen() else onClose()
+                        dragging=false
+                    })
+                .semantics{if(enabled)customActions=listOf(CustomAccessibilityAction(if(confirm)"确认删除记录" else "删除记录"){onDelete();true})}
+                .clickable(onClick=onTap).padding(horizontal=16.dp,vertical=15.dp),verticalAlignment=Alignment.CenterVertically){
+                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(5.dp)){
+                    Text(timeLabel(session.time),fontSize=17.sp,fontWeight=FontWeight.Medium)
+                    Text(session.summary.ifBlank{session.items.firstOrNull()?.translated?.ifBlank{session.items.first().raw}.orEmpty()}.ifBlank{"${session.items.size} 段语音"},fontSize=14.sp,color=scheme.onSurfaceVariant,maxLines=2,overflow=TextOverflow.Ellipsis)
+                }
+                Text("›",fontSize=24.sp,color=scheme.onSurfaceVariant,modifier=Modifier.padding(start=12.dp))
             }
         }
     }
@@ -864,7 +926,7 @@ class MainActivity : ComponentActivity() {
             Button(onClick={summarize(s)},enabled=summaryBusy==null&&current?.takeIf{recording||finishing}?.time!=s.time,shape=corner){Text(if(summaryBusy==s.time)"总结中…" else "生成总结")}
             var confirm by remember {mutableStateOf(false)}
             TextButton(onClick={confirm=true},enabled=current?.takeIf{recording||finishing}?.time!=s.time&&summaryBusy!=s.time){Text("删除记录")}
-            if(confirm)AlertDialog(onDismissRequest={confirm=false},title={Text("删除此会话？")},confirmButton={TextButton(onClick={sessions=sessions.filterNot{it.time==s.time};archive.saveSessions(sessions);if(current?.time==s.time)current=null;navigate("notes")}){Text("删除")}},dismissButton={TextButton(onClick={confirm=false}){Text("取消")}})
+            if(confirm)AlertDialog(onDismissRequest={confirm=false},title={Text("删除此会话？")},confirmButton={TextButton(onClick={deleteSession(s.time);navigate("notes")}){Text("删除")}},dismissButton={TextButton(onClick={confirm=false}){Text("取消")}})
         }
         Panel{s.items.forEachIndexed{i,item->if(newGroup(s.items,i))GroupTime(item);CaptionPair(item,s.time,i)}}
     }
@@ -1004,7 +1066,7 @@ class MainActivity : ComponentActivity() {
                 }
             },enabled=!downloading,shape=corner,modifier=Modifier.fillMaxWidth()){Text(if(downloading)"下载中…" else "下载 / 检查离线翻译模型")}
         }
-        Panel {Text("版本 0.6.2");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
+        Panel {Text("版本 0.6.3");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
     }
     private fun speak(text:String,language:String="") {
         if(text.isBlank())return

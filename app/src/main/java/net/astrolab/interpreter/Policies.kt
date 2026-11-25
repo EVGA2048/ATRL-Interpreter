@@ -210,3 +210,7 @@ internal fun joinAcousticParts(parts:List<Recognition>):Recognition{
     val text=parts.joinToString(" "){it.text.trim().trimEnd('。','.','！','!','？','?')}
     return Recognition(text,scriptLanguages(text).sorted().joinToString("+"))
 }
+
+/** Swiping only reveals an action; it never deletes a session. */
+internal fun shouldRevealDelete(offset:Float,width:Float,velocity:Float):Boolean =
+    when{velocity>600f->false;velocity< -600f->true;else->offset< -width*.45f}

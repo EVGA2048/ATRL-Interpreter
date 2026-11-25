@@ -1,5 +1,9 @@
 # Development log
 
+## 0.6.3
+
+- Swipe left on a session to reveal Delete; tap again to confirm. Swiping never deletes directly.
+
 ## 0.6.2
 
 - Add acoustic language probing and segmented transcription for Chinese, English and Russian code-switching.

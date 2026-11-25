@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.6.2-2859CC?style=flat-square" alt="Version 0.6.2">
+  <img src="https://img.shields.io/badge/version-0.6.3-2859CC?style=flat-square" alt="Version 0.6.3">
   <img src="https://img.shields.io/badge/Android-8.0%2B-536275?style=flat-square" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/ABI-ARM64-82996a?style=flat-square" alt="ARM64">
   <img src="https://img.shields.io/badge/status-development-74747B?style=flat-square" alt="In development">
@@ -103,10 +103,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## 04 / Development
 
-当前版本 **0.6.2**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
+当前版本 **0.6.3**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
 
 | 版本 | 主要变化 |
 |:--|:--|
+| 0.6.3 | 记录左滑删除与二次确认 |
 | 0.6.2 | 中英俄混合识别、原文与翻译分离 |
 | 0.6.1 | 逐句时间戳 |
 | 0.6.0 | T-one 俄语流式预识别、单句编辑、修正词高亮 |
