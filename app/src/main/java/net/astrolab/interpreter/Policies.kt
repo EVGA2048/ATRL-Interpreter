@@ -96,3 +96,51 @@ internal class OrderedCompletion {
     }
     fun clear(){next=0;completed.clear()}
 }
+
+private val spokenWords=Regex("[\\p{L}\\p{N}]+")
+/** Detect decoder loops, not ordinary emphasis or a single repeated word. */
+internal fun hasDecodeLoop(text:String):Boolean{
+    val words=spokenWords.findAll(text.lowercase(java.util.Locale.ROOT)).map{it.value}.take(512).toList()
+    for(i in words.indices){
+        for(period in 1..minOf(8,(words.size-i)/4)){
+            if((period until period*4).all{words[i+it]==words[i+it%period]})return true
+        }
+    }
+    val han=text.filter{it in '\u4e00'..'\u9fff'}.take(512)
+    for(i in han.indices){
+        for(period in 1..minOf(12,(han.length-i)/5)){
+            if((period until period*5).all{han[i+it]==han[i+it%period]})return true
+        }
+    }
+    return false
+}
+internal fun plausibleCaption(text:String,samples:Int):Boolean {
+    if(text.isBlank()||hasDecodeLoop(text))return false
+    val seconds=samples.coerceAtLeast(1)/16000.0
+    val words=spokenWords.findAll(text).count()
+    val han=text.count{it in '\u4e00'..'\u9fff'}
+    return words<=maxOf(8.0,seconds*6.0+3)&&han<=maxOf(12.0,seconds*12.0+6)&&text.length<=maxOf(100.0,seconds*60.0+40)
+}
+/** Keep a good provisional hypothesis visible until a conflicting one is corroborated. */
+internal class PreviewStabilizer {
+    private var visible:Recognition?=null
+    private var candidate:Recognition?=null
+    fun offer(next:Recognition,samples:Int):Recognition?{
+        if(!plausibleCaption(next.text,samples))return visible
+        val old=visible
+        if(old==null){visible=next;candidate=null;return visible}
+        val prefix=commonPrefixLength(old.text,next.text)
+        val compatible=old.language==next.language&&(prefix>=minOf(old.text.length,8)||prefix>=old.text.length*.65)
+        val repeatedCandidate=candidate?.let{it.language==next.language&&commonPrefixLength(it.text,next.text)>=minOf(it.text.length,next.text.length,10)}==true
+        if(compatible||repeatedCandidate){visible=next;candidate=null}
+        else candidate=next
+        return visible
+    }
+    fun reset(){visible=null;candidate=null}
+}
+internal fun asrLanguage(recognition:Recognition):String =
+    if(recognition.language=="ru"&&"ru" in scriptLanguages(recognition.text))"ru"
+    else mixedCode(recognition.text,recognition.language)
+
+internal fun validCloudTranslation(raw:String,translated:String):Boolean =
+    translated.isNotBlank()&&!hasDecodeLoop(translated)&&translated.length<=maxOf(180,raw.length*8)

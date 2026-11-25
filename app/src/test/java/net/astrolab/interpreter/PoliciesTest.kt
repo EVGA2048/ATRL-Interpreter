@@ -68,4 +68,31 @@ class PoliciesTest {
         assertEquals(emptyList<Int>(),order.mark(0))
         order.clear();assertEquals(listOf(0),order.mark(0))
     }
+    @Test fun catchesRunawayDecoderLoops(){
+        assertTrue(hasDecodeLoop("Сегодня мы мы мы мы мы"))
+        assertTrue(hasDecodeLoop("рельсовая цепь рельсовая цепь рельсовая цепь рельсовая цепь"))
+        assertTrue(hasDecodeLoop("测试测试测试测试测试测试"))
+        assertFalse(hasDecodeLoop("Да, да, да. Это рельсовая цепь."))
+        assertFalse(hasDecodeLoop("非常非常重要"))
+        assertFalse(plausibleCaption("слово ".repeat(40),16000))
+        assertTrue(plausibleCaption("В электрической централизации стрелки и сигналы связаны.",64000))
+    }
+    @Test fun unstableHypothesesDoNotFlashOnScreen(){
+        val p=PreviewStabilizer()
+        val first=Recognition("Сегодня мы","ru")
+        assertEquals(first,p.offer(first,32000))
+        assertEquals(first,p.offer(Recognition("мы мы мы мы мы мы","ru"),48000))
+        assertEquals(first,p.offer(Recognition("English test","en"),48000))
+        val next=Recognition("Сегодня мы изучаем сигналы","ru")
+        assertEquals(next,p.offer(next,64000))
+        p.reset()
+        assertNull(p.offer(Recognition("да да да да да","ru"),32000))
+    }
+    @Test fun preservesRussianSentenceWithTechnicalLatinTerms(){
+        assertEquals("ru",asrLanguage(Recognition("Система ETCS применяется на железной дороге.","ru")))
+        assertEquals("en+zh",asrLanguage(Recognition("中文 English","zh")))
+        assertFalse(validCloudTranslation("Проверка","测试测试测试测试测试"))
+        assertFalse(validCloudTranslation("Проверка",""))
+        assertTrue(validCloudTranslation("Проверка рельсовой цепи","检查轨道电路"))
+    }
 }

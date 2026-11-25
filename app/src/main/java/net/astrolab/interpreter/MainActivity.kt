@@ -90,7 +90,7 @@ class MainActivity : ComponentActivity() {
     private var finishing by mutableStateOf(false)
     private var pending by mutableIntStateOf(0)
     private var partial by mutableStateOf<Recognition?>(null)
-    private var partialGeneration=0
+    private var partialGeneration=-1
     private var captureWarning by mutableStateOf("")
     private val localTranslation=Executors.newSingleThreadExecutor()
     private var captureStatus by mutableStateOf("就绪")
@@ -105,6 +105,7 @@ class MainActivity : ComponentActivity() {
     private val recognition = Executors.newSingleThreadExecutor()
     private val network = Executors.newSingleThreadExecutor()
     private val liveNetwork = Executors.newFixedThreadPool(3)
+    private val russianNetwork = Executors.newSingleThreadExecutor()
     private var finalizer: (() -> Unit)? = null
     private val playbackOrder=OrderedCompletion()
     private val warming = AtomicBoolean(false)
@@ -479,7 +480,7 @@ class MainActivity : ComponentActivity() {
         CaptureService.stopRequested = { runOnUiThread { stopCapture() } }
         try { startForegroundService(android.content.Intent(this,CaptureService::class.java)) }
         catch(e:Exception) { active.set(false); CaptureService.stopRequested=null; captureStatus="无法启动录音服务：${e.message}"; return }
-        recording=true; captureStatus="正在聆听"; pending=0;partial=null;partialGeneration=0;captureWarning="";meterHistory=List(30){0f};finalizer=null;playbackOrder.clear()
+        recording=true; captureStatus="正在聆听"; pending=0;partial=null;partialGeneration=-1;captureWarning="";meterHistory=List(30){0f};finalizer=null;playbackOrder.clear()
         Thread {
             var mic:AudioRecord?=null
             var vad:Vad?=null
@@ -490,12 +491,13 @@ class MainActivity : ComponentActivity() {
                 val input=AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION,16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,maxOf(min,6400))
                 mic=input;check(input.state==AudioRecord.STATE_INITIALIZED);input.startRecording()
                 val detector=Vad(assets,VadModelConfig(sileroVadModelConfig=SileroVadModelConfig(
-                    model="asr/silero_vad.onnx",threshold=0.5f,minSilenceDuration=0.30f,minSpeechDuration=0.25f,
-                    windowSize=512,maxSpeechDuration=4.5f),sampleRate=16000,numThreads=1,provider="cpu"))
+                    model="asr/silero_vad.onnx",threshold=0.5f,minSilenceDuration=0.38f,minSpeechDuration=0.25f,
+                    windowSize=512,maxSpeechDuration=5.0f),sampleRate=16000,numThreads=1,provider="cpu"))
                 vad=detector
                 val block=ShortArray(512)
                 val origin=System.currentTimeMillis()
                 val generation=AtomicInteger(0)
+                val stabilizer=PreviewStabilizer()
                 val preroll=ArrayDeque<FloatArray>()
                 val previewBlocks=ArrayList<FloatArray>()
                 var previewSamples=0
@@ -514,10 +516,24 @@ class MainActivity : ComponentActivity() {
                             asrJobs.incrementAndGet()
                             recognition.execute {
                                 try {
-                                    val result=engine.transcribe(samples)
+                                    val result=engine.transcribe(samples,final=true)
                                     runOnUiThread {
                                         if(current?.time==started&&partialGeneration<=epoch)partial=null
-                                        if(result.text.isNotBlank())enqueue(result.text,result.language,started,api,cloud,from,until)
+                                        if(result.text.isNotBlank()){
+                                            if(plausibleCaption(result.text,samples.size))enqueue(result.text,result.language,started,api,cloud,from,until)
+                                            else {
+                                                captureWarning="部分语音未能可靠识别"
+                                                current?.takeIf{it.time==started}?.let{session->
+                                                    val pos=session.items.size
+                                                    val failed=Segment(result.text,corrected="识别未完成",error="识别异常",language=result.language,time=until,startTime=from)
+                                                    current=session.copy(items=session.items+failed);saveCurrent()
+                                                    for(index in playbackOrder.mark(pos)){
+                                                        val ready=current?.items?.getOrNull(index)
+                                                        if(autoSpeak&&ready!=null&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 } catch(e:Throwable) {runOnUiThread{captureWarning="识别失败，请检查语音模型"}}
                                 finally {asrJobs.decrementAndGet()}
@@ -543,7 +559,7 @@ class MainActivity : ComponentActivity() {
                             previewBlocks.addAll(preroll);previewSamples=preroll.sumOf{it.size}
                         }
                         if(previewSamples<16000*8){previewBlocks.add(samples);previewSamples+=n}
-                        if(previewSamples>=19200 && previewSamples-lastPreview>=19200 && asrJobs.compareAndSet(0,1)){
+                        if(previewSamples>=25600 && previewSamples-lastPreview>=24000 && asrJobs.compareAndSet(0,1)){
                             val snapshot=FloatArray(previewSamples);var pos=0
                             for(chunk in previewBlocks){chunk.copyInto(snapshot,pos);pos+=chunk.size}
                             val epoch=generation.get();lastPreview=previewSamples
@@ -551,7 +567,11 @@ class MainActivity : ComponentActivity() {
                                 try{
                                     val result=engine.transcribe(snapshot)
                                     if(result.text.isNotBlank()&&active.get()&&generation.get()==epoch)runOnUiThread{
-                                        if(current?.time==started&&active.get()&&generation.get()==epoch){partialGeneration=epoch;partial=result}
+                                        if(current?.time==started&&active.get()&&generation.get()==epoch){
+                                            if(partialGeneration!=epoch)stabilizer.reset()
+                                            partialGeneration=epoch
+                                            partial=stabilizer.offer(result,snapshot.size)
+                                        }
                                     }
                                 }catch(_:Throwable){}finally{asrJobs.decrementAndGet()}
                             }
@@ -588,18 +608,22 @@ class MainActivity : ComponentActivity() {
             if(!translated.isNullOrBlank())runOnUiThread{
                 val existing=current?.takeIf{it.time==id}?.items?.getOrNull(pos)
                 if(existing!=null&&existing.translated.isBlank()&&existing.error.isBlank())
-                    updateSegment(id,pos,base.copy(translated=translated))
+                    updateSegment(id,pos,base.copy(translated=translated,error=if(online&&config.key.isNotBlank())"本地初译" else ""))
             }
             translated
         }
-        liveNetwork.execute {
+        (if(lang=="ru"||lang.contains("ru+"))russianNetwork else liveNetwork).execute {
             val snapshot=currentContextForWorker(id,pos)
             val analysis=if(online&&config.key.isNotBlank())runCatching{engine.analyze(config,raw,snapshot.first,snapshot.second,target,true,lang)} else null
             val a=analysis?.getOrNull()
-            val final=if(a!=null)base.copy(corrected=if(correctionKeepsScripts(raw,a.corrected))a.corrected else raw,translated=a.translated,scene=a.scene)
+            val final=if(a!=null)base.copy(corrected=if(correctionKeepsScripts(raw,a.corrected)&&!hasDecodeLoop(a.corrected))a.corrected else raw,translated=a.translated,scene=a.scene)
             else {
                 val translated=runCatching{local.get(15,java.util.concurrent.TimeUnit.SECONDS)}.getOrNull().orEmpty()
-                base.copy(translated=translated,error=if(translated.isBlank())"翻译不可用，请检查网络或离线语言包" else "")
+                base.copy(translated=translated,error=when{
+                    translated.isBlank()->"翻译不可用，请检查网络或离线语言包"
+                    online&&config.key.isNotBlank()&&cloud->"网络翻译不可用 · 本地译文"
+                    else->""
+                })
             }
             runOnUiThread {
                 updateSegment(id,pos,final);mergeTerms(a?.terms.orEmpty())
@@ -830,7 +854,7 @@ class MainActivity : ComponentActivity() {
                 }
             },enabled=!downloading,shape=corner,modifier=Modifier.fillMaxWidth()){Text(if(downloading)"下载中…" else "下载 / 检查离线翻译模型")}
         }
-        Panel {Text("版本 0.5.1");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
+        Panel {Text("版本 0.5.2");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
     }
     private fun speak(text:String,language:String="") {
         if(text.isBlank())return

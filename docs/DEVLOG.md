@@ -1,5 +1,13 @@
 # Development log
 
+## 0.5.2
+
+- Restore Whisper and VAD parameters from 0.4.1.
+- Reject repetitive or implausible provisional hypotheses; retry abnormal final recognition and retain unresolved source text in the session.
+- Preserve Russian technical phrases with Latin abbreviations and process Russian cloud translations in transcript order.
+- Distinguish provisional local translation from cloud output.
+- Eleven JVM regression tests passed.
+
 ## 0.5.1
 
 - Refine navigation glyphs, translation editor and result actions.
