@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.5.0-2859CC?style=flat-square" alt="Version 0.5.0">
+  <img src="https://img.shields.io/badge/version-0.5.1-2859CC?style=flat-square" alt="Version 0.5.1">
   <img src="https://img.shields.io/badge/Android-8.0%2B-536275?style=flat-square" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/ABI-ARM64-82996a?style=flat-square" alt="ARM64">
   <img src="https://img.shields.io/badge/status-development-74747B?style=flat-square" alt="In development">
@@ -103,10 +103,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## 04 / Development
 
-当前版本 **0.5.0**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
+当前版本 **0.5.1**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
 
 | 版本 | 主要变化 |
 |:--|:--|
+| 0.5.1 | 导航与图标、字幕排版、实时音量历史、会话分组 |
 | 0.5.0 | 中英混说识别、并行翻译、字幕动画、本地与联网模式 |
 | 0.4.1 | 云端失败退避、相关术语筛选、音量更新节流、过期文字结果隔离 |
 | 0.4.0 | 连续字幕、准流式识别、60 秒时间分组、分类词库 |
@@ -114,7 +115,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 | 0.2.0 | 本地 ASR、语义增强、记录、总结、术语与 TTS |
 | 0.1.0 | Android 工程与真机录音原型 |
 
-0.5.0 仍处于开发阶段，主要优化混合语音识别与传译延迟。
+0.5.1 主要调整翻译、传译及会话记录的界面。
 
 详细记录：[DEVLOG](docs/DEVLOG.md) / [App Icon Standard](docs/ASTROLAB-APP-ICON-STANDARD.md)。
 

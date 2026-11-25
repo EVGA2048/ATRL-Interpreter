@@ -1,5 +1,12 @@
 # Development log
 
+## 0.5.1
+
+- Refine navigation glyphs, translation editor and result actions.
+- Compact capture controls and render a rolling history of microphone levels.
+- Refine bilingual typography and group sessions by date.
+- Debug build and eight JVM tests passed.
+
 ## 0.5.0
 
 - SenseVoice INT8 assists Chinese–English code-switching. Russian remains on Whisper Base.

@@ -9,6 +9,8 @@ import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
@@ -34,6 +36,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -78,6 +85,7 @@ class MainActivity : ComponentActivity() {
     private var current by mutableStateOf<Session?>(null)
     private var viewed by mutableStateOf<Long?>(null)
     private var level by mutableFloatStateOf(0f)
+    private var meterHistory by mutableStateOf(List(30){0f})
     private var recording by mutableStateOf(false)
     private var finishing by mutableStateOf(false)
     private var pending by mutableIntStateOf(0)
@@ -107,6 +115,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge(statusBarStyle=SystemBarStyle.auto(0xFFF5F5F7.toInt(),0xFF101113.toInt()),navigationBarStyle=SystemBarStyle.auto(0xFFFFFFFF.toInt(),0xFF1D1E21.toInt()))
         engine = Engine(applicationContext)
         archive = Archive(this); settings = ApiSettings(this)
         runCatching { settings.load() }.onSuccess { api = it }.onFailure { message = "API 配置读取失败，请重新保存" }
@@ -122,9 +131,9 @@ class MainActivity : ComponentActivity() {
                     BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().imePadding()){
                         val wide=maxWidth>=650.dp
                         Column(Modifier.align(Alignment.TopCenter).widthIn(max=920.dp).fillMaxSize()){
-                            Row(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=8.dp).heightIn(min=52.dp),verticalAlignment=Alignment.CenterVertically){
+                            Row(Modifier.fillMaxWidth().padding(start=20.dp,end=12.dp,top=5.dp,bottom=8.dp).heightIn(min=52.dp),verticalAlignment=Alignment.CenterVertically){
                                 if(page=="settings"||page=="detail") TextButton(onClick={navigate(if(page=="detail")"notes" else previousPage)},contentPadding=PaddingValues(end=12.dp)){Text("‹ 返回",fontSize=16.sp)}
-                                Text(when(page){"text"->"翻译";"live"->"传译";"notes"->"记录";"terms"->"词库";"settings"->"设置";else->"会话"},fontSize=if(page=="detail"||page=="settings")22.sp else 30.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
+                                Text(when(page){"text"->"翻译";"live"->"传译";"notes"->"记录";"terms"->"词库";"settings"->"设置";else->"会话"},fontSize=if(page=="detail"||page=="settings")23.sp else 32.sp,letterSpacing=(-.8).sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
                                 if(page=="text"||page=="live")ModeIndicator()
                                 if(page!="settings"&&page!="detail")IconButton(onClick={previousPage=page;navigate("settings")}){NavGlyph("settings",scheme.onSurface,Modifier.size(24.dp))}
                             }
@@ -138,13 +147,14 @@ class MainActivity : ComponentActivity() {
                             }
                             if(page!="settings"&&page!="detail"){
                                 HorizontalDivider(color=scheme.outline.copy(alpha=.6f))
-                                Row(Modifier.fillMaxWidth().background(scheme.surface).padding(vertical=6.dp)){
+                                Row(Modifier.fillMaxWidth().background(scheme.surface).padding(horizontal=8.dp,vertical=3.dp)){
                                     for((id,label) in listOf("text" to "翻译","live" to "传译","notes" to "记录","terms" to "词库")){
-                                        val selected=page==id
-                                        val color=if(selected)scheme.primary else scheme.onSurfaceVariant
-                                        Column(Modifier.weight(1f).heightIn(min=54.dp).clickable{navigate(id)}.padding(vertical=4.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center){
-                                            NavGlyph(id,color,Modifier.size(23.dp))
-                                            Spacer(Modifier.height(4.dp));Text(label,color=color,fontSize=11.sp,fontWeight=if(selected)FontWeight.SemiBold else FontWeight.Normal)
+                                        val activeTab=page==id
+                                        val color by animateColorAsState(if(activeTab)scheme.primary else scheme.onSurfaceVariant,tween(160),label="tab")
+                                        Column(Modifier.weight(1f).heightIn(min=57.dp).semantics{selected=activeTab}.clickable{navigate(id)},horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center){
+                                            NavGlyph(id,color,Modifier.size(24.dp),activeTab)
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(label,color=color,fontSize=11.sp,fontWeight=if(activeTab)FontWeight.SemiBold else FontWeight.Normal)
                                         }
                                     }
                                 }
@@ -194,16 +204,36 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    @Composable private fun NavGlyph(id:String,color:Color,modifier:Modifier=Modifier){
-        Canvas(modifier.semantics{contentDescription=if(id=="settings")"设置" else ""}){
+    @Composable private fun NavGlyph(id:String,color:Color,modifier:Modifier=Modifier,active:Boolean=false){
+        Canvas(if(id=="settings")modifier.semantics{contentDescription="设置"} else modifier){
             val w=size.width;val h=size.height;val st=1.8.dp.toPx()
             fun line(x1:Float,y1:Float,x2:Float,y2:Float)=drawLine(color,Offset(w*x1,h*y1),Offset(w*x2,h*y2),st,StrokeCap.Round)
+            fun outline(p:Path)=drawPath(p,color,style=Stroke(st,cap=StrokeCap.Round,join=androidx.compose.ui.graphics.StrokeJoin.Round))
+            fun path(points:List<Pair<Float,Float>>,close:Boolean=false)=Path().apply{
+                moveTo(points[0].first*w,points[0].second*h);points.drop(1).forEach{lineTo(it.first*w,it.second*h)};if(close)close()
+            }
             when(id){
-                "text"->{drawRoundRect(color,Offset(w*.06f,h*.11f),Size(w*.72f,h*.61f),androidx.compose.ui.geometry.CornerRadius(w*.12f),style=Stroke(st));line(.25f,.72f,.17f,.90f);line(.22f,.31f,.61f,.31f);line(.22f,.48f,.49f,.48f);line(.84f,.40f,.93f,.40f);line(.93f,.40f,.93f,.91f)}
-                "live"->{for(i in 0..4){val x=.12f+i*.19f;val a=listOf(.18f,.35f,.45f,.30f,.14f)[i];line(x,.5f-a,x,.5f+a)}}
-                "notes"->{drawRoundRect(color,Offset(w*.18f,h*.06f),Size(w*.65f,h*.87f),androidx.compose.ui.geometry.CornerRadius(w*.08f),style=Stroke(st));for(i in 0..2)line(.33f,.30f+i*.18f,.69f,.30f+i*.18f)}
-                "terms"->{line(.50f,.20f,.50f,.91f);line(.08f,.13f,.50f,.20f);line(.50f,.20f,.92f,.13f);line(.08f,.13f,.08f,.83f);line(.92f,.13f,.92f,.83f);line(.08f,.83f,.50f,.91f);line(.92f,.83f,.50f,.91f)}
-                else->{drawCircle(color,w*.20f,style=Stroke(st));drawCircle(color,w*.39f,style=Stroke(st));for(i in 0..7){val a=i*Math.PI/4;line((.5+.39*kotlin.math.cos(a)).toFloat(),(.5+.39*kotlin.math.sin(a)).toFloat(),(.5+.49*kotlin.math.cos(a)).toFloat(),(.5+.49*kotlin.math.sin(a)).toFloat())}}
+                "text"->{
+                    val p=Path().apply{moveTo(w*.20f,h*.13f);lineTo(w*.68f,h*.13f);quadraticTo(w*.85f,h*.13f,w*.85f,h*.30f);lineTo(w*.85f,h*.57f);quadraticTo(w*.85f,h*.74f,w*.68f,h*.74f);lineTo(w*.43f,h*.74f);lineTo(w*.22f,h*.90f);lineTo(w*.25f,h*.74f);quadraticTo(w*.06f,h*.73f,w*.06f,h*.55f);lineTo(w*.06f,h*.30f);quadraticTo(w*.06f,h*.13f,w*.20f,h*.13f);close()}
+                    if(active)drawPath(p,color.copy(alpha=.13f));outline(p)
+                    line(.24f,.35f,.66f,.35f);line(.24f,.51f,.55f,.51f)
+                }
+                "live"->{for(i in 0..4){val x=.12f+i*.19f;val a=listOf(.14f,.30f,.43f,.26f,.12f)[i];drawLine(color,Offset(w*x,h*(.5f-a)),Offset(w*x,h*(.5f+a)),if(active)2.6.dp.toPx() else st,StrokeCap.Round)}}
+                "notes"->{
+                    val p=path(listOf(.20f to .08f,.66f to .08f,.84f to .27f,.84f to .92f,.20f to .92f),true)
+                    if(active)drawPath(p,color.copy(alpha=.13f));outline(p);line(.66f,.08f,.66f,.27f);line(.66f,.27f,.84f,.27f)
+                    for(i in 0..2)line(.34f,.43f+i*.15f,.69f,.43f+i*.15f)
+                }
+                "terms"->{
+                    val p=Path().apply{moveTo(w*.50f,h*.23f);quadraticTo(w*.28f,h*.07f,w*.08f,h*.14f);lineTo(w*.08f,h*.80f);quadraticTo(w*.30f,h*.75f,w*.50f,h*.89f);quadraticTo(w*.70f,h*.75f,w*.92f,h*.80f);lineTo(w*.92f,h*.14f);quadraticTo(w*.72f,h*.07f,w*.50f,h*.23f);close()}
+                    if(active)drawPath(p,color.copy(alpha=.13f));outline(p);line(.50f,.23f,.50f,.89f)
+                }
+                "mic"->{drawRoundRect(color,Offset(w*.35f,h*.06f),Size(w*.30f,h*.53f),androidx.compose.ui.geometry.CornerRadius(w*.15f),style=Stroke(st));drawArc(color,0f,180f,false,Offset(w*.20f,h*.25f),Size(w*.60f,h*.50f),style=Stroke(st,cap=StrokeCap.Round));line(.50f,.75f,.50f,.93f);line(.32f,.93f,.68f,.93f)}
+                "copy"->{drawRoundRect(color,Offset(w*.30f,h*.26f),Size(w*.57f,h*.65f),androidx.compose.ui.geometry.CornerRadius(w*.09f),style=Stroke(st));line(.14f,.72f,.14f,.09f);line(.14f,.09f,.70f,.09f)}
+                "speaker"->{outline(path(listOf(.10f to .37f,.30f to .37f,.52f to .15f,.52f to .85f,.30f to .63f,.10f to .63f),true));drawArc(color,-50f,100f,false,Offset(w*.37f,h*.24f),Size(w*.40f,h*.52f),style=Stroke(st,cap=StrokeCap.Round));drawArc(color,-49f,98f,false,Offset(w*.29f,h*.07f),Size(w*.65f,h*.86f),style=Stroke(st,cap=StrokeCap.Round))}
+                "close"->{line(.27f,.27f,.73f,.73f);line(.73f,.27f,.27f,.73f)}
+                "stop"->{drawRoundRect(color,Offset(w*.24f,h*.24f),Size(w*.52f,h*.52f),androidx.compose.ui.geometry.CornerRadius(w*.06f))}
+                else->{drawCircle(color,w*.18f,style=Stroke(st));val p=Path().apply{for(i in 0..31){val a=i*Math.PI/16;val r=if(i%4==0||i%4==1).44 else .35;val x=w*(.5+r*kotlin.math.cos(a)).toFloat();val y=h*(.5+r*kotlin.math.sin(a)).toFloat();if(i==0)moveTo(x,y) else lineTo(x,y)};close()};outline(p)}
             }
         }
     }
@@ -229,30 +259,49 @@ class MainActivity : ComponentActivity() {
         }
     }
     @Composable private fun TextPage(){
-        Panel{
-            LanguageMenu()
-            HorizontalDivider(color=MaterialTheme.colorScheme.outline.copy(alpha=.5f))
-            BasicTextField(value=draft,onValueChange={draft=it;textResult=null},modifier=Modifier.fillMaxWidth().heightIn(min=128.dp),textStyle=TextStyle(color=MaterialTheme.colorScheme.onSurface,fontSize=23.sp,lineHeight=31.sp),cursorBrush=SolidColor(MaterialTheme.colorScheme.primary),decorationBox={inner->
-                Box{if(draft.isEmpty())Text("输入文字",color=MaterialTheme.colorScheme.onSurfaceVariant,fontSize=23.sp);inner()}
-            })
-            Row(verticalAlignment=Alignment.CenterVertically){
-                TextButton(onClick={draft="";textResult=null},enabled=draft.isNotEmpty()&&!textBusy){Text("清除")}
-                Spacer(Modifier.weight(1f))
-                Button(onClick={translateTyped()},enabled=draft.isNotBlank()&&!textBusy,shape=RoundedCornerShape(22.dp)){Text(if(textBusy)"翻译中…" else "翻译")}
+        val scheme=MaterialTheme.colorScheme
+        val focus=LocalFocusManager.current
+        val keyboard=LocalSoftwareKeyboardController.current
+        Surface(shape=RoundedCornerShape(18.dp),color=scheme.surface,modifier=Modifier.fillMaxWidth()){
+            Column(Modifier.padding(horizontal=18.dp,vertical=10.dp)){
+                LanguageMenu()
+                HorizontalDivider(color=scheme.outline.copy(alpha=.55f))
+                BasicTextField(value=draft,onValueChange={draft=it;textResult=null},modifier=Modifier.fillMaxWidth().padding(top=17.dp,bottom=8.dp).heightIn(min=145.dp),
+                    textStyle=TextStyle(color=scheme.onSurface,fontSize=23.sp,lineHeight=32.sp),cursorBrush=SolidColor(scheme.primary),decorationBox={inner->
+                    Box{if(draft.isEmpty())Text("输入文字",color=scheme.onSurfaceVariant.copy(alpha=.85f),fontSize=23.sp);inner()}
+                })
+                Row(Modifier.fillMaxWidth().padding(bottom=5.dp),verticalAlignment=Alignment.CenterVertically){
+                    IconButton(onClick={draft="";textResult=null},enabled=draft.isNotEmpty()&&!textBusy){
+                        NavGlyph("close",if(draft.isNotEmpty())scheme.onSurfaceVariant else scheme.onSurfaceVariant.copy(alpha=.35f),Modifier.size(22.dp).semantics{contentDescription="清除"})
+                    }
+                    IconButton(onClick={focus.clearFocus();keyboard?.hide();navigate("live")}){
+                        NavGlyph("mic",scheme.primary,Modifier.size(23.dp).semantics{contentDescription="语音传译"})
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Button(onClick={focus.clearFocus();keyboard?.hide();translateTyped()},enabled=draft.isNotBlank()&&!textBusy,shape=RoundedCornerShape(12.dp),modifier=Modifier.height(44.dp),contentPadding=PaddingValues(horizontal=24.dp)){
+                        if(textBusy){CircularProgressIndicator(Modifier.size(15.dp),strokeWidth=2.dp,color=scheme.onPrimary);Spacer(Modifier.width(8.dp))}
+                        Text(if(textBusy)"翻译中" else "翻译",fontSize=15.sp)
+                    }
+                }
             }
         }
-        textResult?.let{s->Panel{
-            Text(languageName(s.target),color=MaterialTheme.colorScheme.primary,fontSize=14.sp,fontWeight=FontWeight.Medium)
-            Text(s.translated.ifBlank{if(s.error.isBlank())"正在翻译…" else "未获得译文"},fontSize=24.sp,lineHeight=33.sp)
-            if(s.error.isNotBlank())Text(s.error,fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                TextButton(onClick={speak(s.translated,s.target)},enabled=s.translated.isNotBlank()){Text("朗读")}
-                TextButton(onClick={copyText(s.translated)},enabled=s.translated.isNotBlank()){Text("复制")}
+        AnimatedVisibility(textResult!=null,enter=fadeIn(tween(200))+expandVertically(tween(220),expandFrom=Alignment.Top)){
+            textResult?.let{s->
+                Surface(shape=RoundedCornerShape(18.dp),color=scheme.surface,modifier=Modifier.fillMaxWidth()){
+                    Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
+                        Row(verticalAlignment=Alignment.CenterVertically){
+                            Text(languageName(s.target),color=scheme.primary,fontSize=14.sp,fontWeight=FontWeight.Medium,modifier=Modifier.weight(1f))
+                            IconButton(onClick={speak(s.translated,s.target)},enabled=s.translated.isNotBlank()){NavGlyph("speaker",scheme.primary,Modifier.size(22.dp).semantics{contentDescription="朗读"})}
+                            IconButton(onClick={copyText(s.translated)},enabled=s.translated.isNotBlank()){NavGlyph("copy",scheme.primary,Modifier.size(20.dp).semantics{contentDescription="复制"})}
+                        }
+                        SelectionContainer{Text(s.translated.ifBlank{if(s.error.isBlank())"正在翻译…" else "未获得译文"},fontSize=25.sp,lineHeight=35.sp,color=scheme.onSurface)}
+                        if(s.error.isNotBlank())Text(s.error,fontSize=12.sp,color=scheme.onSurfaceVariant)
+                        Spacer(Modifier.height(4.dp))
+                    }
+                }
             }
-        }}
-        if(textResult==null&&!textBusy&&draft.isBlank())TextButton(onClick={navigate("live")},modifier=Modifier.alignForCenter()){Text("使用麦克风")}
+        }
     }
-    private fun Modifier.alignForCenter()=this.fillMaxWidth()
     private fun copyText(value:String){
         val cm=getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
         cm.setPrimaryClip(android.content.ClipData.newPlainText("Interpreter",value))
@@ -298,20 +347,20 @@ class MainActivity : ComponentActivity() {
         val scheme=MaterialTheme.colorScheme
         val done=s.translated.isNotBlank()
         val rawColor by animateColorAsState(if(done)scheme.onSurface else scheme.onSurfaceVariant,tween(220),label="caption color")
-        Column(Modifier.fillMaxWidth().padding(vertical=5.dp),verticalArrangement=Arrangement.spacedBy(3.dp)){
+        var showRaw by remember(s.raw){mutableStateOf(false)}
+        val corrected=s.corrected.isNotBlank()&&s.corrected!=s.raw
+        Column(Modifier.fillMaxWidth().padding(vertical=7.dp),verticalArrangement=Arrangement.spacedBy(3.dp)){
             SelectionContainer{
-                Text(s.corrected.ifBlank{s.raw},fontSize=16.sp,lineHeight=23.sp,color=rawColor)
+                Text(if(showRaw)s.raw else s.corrected.ifBlank{s.raw},fontSize=16.sp,lineHeight=24.sp,color=rawColor)
             }
             AnimatedVisibility(visible=done,enter=fadeIn(tween(220))+expandVertically(tween(180),expandFrom=Alignment.Top)){
                 SelectionContainer{
-                    Text(s.translated,fontSize=19.sp,lineHeight=27.sp,color=scheme.primary,fontWeight=FontWeight.Medium)
+                    Text(s.translated,fontSize=20.sp,lineHeight=29.sp,color=scheme.primary,fontWeight=FontWeight.Medium)
                 }
             }
             if(s.error.isNotBlank())Text(s.error,fontSize=11.sp,color=scheme.onSurfaceVariant)
-            if(s.corrected.isNotBlank()&&s.corrected!=s.raw){
-                var showRaw by remember(s.raw){mutableStateOf(false)}
-                Text(if(showRaw)s.raw else "查看原始识别",fontSize=11.sp,color=scheme.onSurfaceVariant,modifier=Modifier.clickable{showRaw=!showRaw})
-            }
+            if(corrected&&showRaw)Text("显示校正文本",fontSize=11.sp,color=scheme.onSurfaceVariant,modifier=Modifier.clickable{showRaw=false})
+            else if(corrected)Text("原文",fontSize=11.sp,color=scheme.onSurfaceVariant,modifier=Modifier.clickable{showRaw=true})
         }
     }
     @Composable private fun PartialCaption(value:String){
@@ -392,22 +441,35 @@ class MainActivity : ComponentActivity() {
             current?.summary?.takeIf{it.isNotBlank()}?.let{
                 TextButton(onClick={viewed=current?.time;navigate("detail")}){Text("查看会话总结")}
             }
-            Row(Modifier.fillMaxWidth().padding(top=8.dp),verticalAlignment=Alignment.CenterVertically){
-                val smoothLevel by animateFloatAsState(level,tween(110),label="audio level")
-                Canvas(Modifier.width(95.dp).height(30.dp)){
-                    for(i in 0..17){val x=size.width*(i+.5f)/18;val h=1.5f+smoothLevel*size.height*.44f*(.3f+(i%9)/12f);drawLine(cobalt,Offset(x,size.height/2-h),Offset(x,size.height/2+h),strokeWidth=2.dp.toPx(),cap=StrokeCap.Round)}
+            val scheme=MaterialTheme.colorScheme
+            Row(Modifier.fillMaxWidth().padding(top=10.dp,bottom=10.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){
+                val smoothLevel by animateFloatAsState(if(recording)level else 0f,tween(120),label="audio level")
+                val history=meterHistory
+                val meterColor=if(recording)scheme.primary else scheme.onSurfaceVariant.copy(alpha=.40f)
+                Surface(Modifier.weight(1f).height(54.dp),color=scheme.surface,shape=RoundedCornerShape(14.dp)){
+                    Canvas(Modifier.fillMaxSize().padding(horizontal=13.dp,vertical=12.dp)){
+                        for(i in history.indices){
+                            val x=size.width*(i+.5f)/history.size
+                            val v=if(!recording)0f else if(i==history.lastIndex)smoothLevel else history[i]
+                            val h=1.dp.toPx()+v*size.height*.44f
+                            drawLine(meterColor.copy(alpha=.30f+.70f*i/(history.size-1)),Offset(x,size.height/2-h),Offset(x,size.height/2+h),strokeWidth=1.8.dp.toPx(),cap=StrokeCap.Round)
+                        }
+                    }
                 }
-                Spacer(Modifier.weight(1f));Text("朗读",fontSize=13.sp)
-                Switch(checked=autoSpeak,onCheckedChange={autoSpeak=it},modifier=Modifier.padding(start=6.dp))
+                Surface(onClick={autoSpeak=!autoSpeak},modifier=Modifier.size(54.dp).semantics{contentDescription=if(autoSpeak)"关闭自动朗读" else "开启自动朗读";selected=autoSpeak},shape=RoundedCornerShape(14.dp),color=if(autoSpeak)scheme.primary.copy(alpha=.12f) else scheme.surface){
+                    Box(contentAlignment=Alignment.Center){NavGlyph("speaker",if(autoSpeak)scheme.primary else scheme.onSurfaceVariant,Modifier.size(23.dp))}
+                }
+                val buttonColor by animateColorAsState(if(recording)Color(0xFFBE3941) else scheme.primary,tween(180),label="capture")
+                Button(onClick={
+                    if(recording)stopCapture()
+                    else if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)startCapture()
+                    else permission.launch(Manifest.permission.RECORD_AUDIO)
+                },enabled=!finishing,modifier=Modifier.height(54.dp),shape=RoundedCornerShape(14.dp),colors=ButtonDefaults.buttonColors(containerColor=buttonColor),contentPadding=PaddingValues(horizontal=15.dp)){
+                    if(finishing)CircularProgressIndicator(Modifier.size(18.dp),strokeWidth=2.dp,color=scheme.onSurfaceVariant)
+                    else NavGlyph(if(recording)"stop" else "mic",scheme.onPrimary,Modifier.size(20.dp))
+                    Spacer(Modifier.width(7.dp));Text(if(recording)"结束" else if(finishing)"整理中" else "聆听",fontSize=15.sp)
+                }
             }
-            Button(onClick={
-                if(recording)stopCapture()
-                else if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)startCapture()
-                else permission.launch(Manifest.permission.RECORD_AUDIO)
-            },enabled=!finishing,modifier=Modifier.fillMaxWidth().height(50.dp).padding(bottom=2.dp),shape=RoundedCornerShape(25.dp),colors=ButtonDefaults.buttonColors(containerColor=if(recording)Color(0xFFC83C42) else MaterialTheme.colorScheme.primary)){
-                Text(if(recording)"结束会话" else if(finishing)"正在整理…" else "开始聆听",fontSize=16.sp)
-            }
-            Spacer(Modifier.height(8.dp))
         }
     }
     private fun startCapture() {
@@ -417,7 +479,7 @@ class MainActivity : ComponentActivity() {
         CaptureService.stopRequested = { runOnUiThread { stopCapture() } }
         try { startForegroundService(android.content.Intent(this,CaptureService::class.java)) }
         catch(e:Exception) { active.set(false); CaptureService.stopRequested=null; captureStatus="无法启动录音服务：${e.message}"; return }
-        recording=true; captureStatus="正在聆听"; pending=0;partial=null;partialGeneration=0;captureWarning="";finalizer=null;playbackOrder.clear()
+        recording=true; captureStatus="正在聆听"; pending=0;partial=null;partialGeneration=0;captureWarning="";meterHistory=List(30){0f};finalizer=null;playbackOrder.clear()
         Thread {
             var mic:AudioRecord?=null
             var vad:Vad?=null
@@ -471,7 +533,7 @@ class MainActivity : ComponentActivity() {
                     val samples=FloatArray(n){block[it]/32768f}
                     val rms=sqrt(samples.sumOf{(it*it).toDouble()}/n)
                     val meterNow=android.os.SystemClock.elapsedRealtime()
-                    if(meterNow-lastMeter>=80L){lastMeter=meterNow;runOnUiThread {level=(rms*5).toFloat().coerceIn(0f,1f)}}
+                    if(meterNow-lastMeter>=80L){lastMeter=meterNow;runOnUiThread {level=(rms*5).toFloat().coerceIn(0f,1f);meterHistory=(meterHistory.drop(1)+level)}}
                     detector.acceptWaveform(samples)
                     if(drain()){
                         previewBlocks.clear();previewSamples=0;lastPreview=0;preroll.clear()
@@ -591,14 +653,33 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    @Composable private fun NotesPage() {
-
-        if(sessions.isEmpty())Panel {Text("暂无会话");Text("结束实时传译后，会话将保存在本机。",fontSize=12.sp)}
-        sessions.forEach { s -> Panel {
-            Text(s.title,fontSize=18.sp);Text("${s.items.size} 段语音",fontSize=12.sp)
-            if(s.summary.isNotBlank())Text(s.summary.take(100))
-            Button(onClick={viewed=s.time;navigate("detail")},shape=corner){Text("打开记录")}
-        }}
+    @Composable private fun NotesPage(){
+        val scheme=MaterialTheme.colorScheme
+        if(sessions.isEmpty()){
+            Column(Modifier.fillMaxWidth().padding(top=55.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(14.dp)){
+                NavGlyph("notes",scheme.onSurfaceVariant.copy(alpha=.6f),Modifier.size(42.dp))
+                Text("暂无会话",fontSize=18.sp,fontWeight=FontWeight.Medium,color=scheme.onSurfaceVariant)
+            }
+            return
+        }
+        val dateFormat=java.text.SimpleDateFormat("yyyy年 M月 d日",Locale.CHINA)
+        sessions.groupBy{dateFormat.format(java.util.Date(it.time))}.forEach{(day,entries)->
+            Text(day,fontSize=13.sp,color=scheme.onSurfaceVariant,modifier=Modifier.padding(start=6.dp,top=5.dp))
+            Surface(shape=RoundedCornerShape(16.dp),color=scheme.surface){
+                Column(Modifier.fillMaxWidth()){
+                    entries.forEachIndexed{i,session->
+                        if(i>0)HorizontalDivider(Modifier.padding(start=16.dp),color=scheme.outline.copy(alpha=.45f))
+                        Row(Modifier.fillMaxWidth().clickable{viewed=session.time;navigate("detail")}.padding(horizontal=16.dp,vertical=15.dp),verticalAlignment=Alignment.CenterVertically){
+                            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(5.dp)){
+                                Text(timeLabel(session.time),fontSize=17.sp,fontWeight=FontWeight.Medium)
+                                Text(session.summary.ifBlank{session.items.firstOrNull()?.translated?.ifBlank{session.items.first().raw}.orEmpty()}.ifBlank{"${session.items.size} 段语音"},fontSize=14.sp,color=scheme.onSurfaceVariant,maxLines=2,overflow=TextOverflow.Ellipsis)
+                            }
+                            Text("›",fontSize=24.sp,color=scheme.onSurfaceVariant,modifier=Modifier.padding(start=12.dp))
+                        }
+                    }
+                }
+            }
+        }
     }
     @Composable private fun DetailPage() {
         val s=sessions.firstOrNull{it.time==viewed}
@@ -749,7 +830,7 @@ class MainActivity : ComponentActivity() {
                 }
             },enabled=!downloading,shape=corner,modifier=Modifier.fillMaxWidth()){Text(if(downloading)"下载中…" else "下载 / 检查离线翻译模型")}
         }
-        Panel {Text("版本 0.5.0");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
+        Panel {Text("版本 0.5.1");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
     }
     private fun speak(text:String,language:String="") {
         if(text.isBlank())return
