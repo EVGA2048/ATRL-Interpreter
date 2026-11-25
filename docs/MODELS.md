@@ -1,6 +1,8 @@
 # Model and runtime manifest
 
-Runtime: sherpa-onnx v2.0.3. Models are downloaded from upstream release assets by `scripts/fetch-models.sh`. SHA-256 identifies the exact locally built artifacts.
+sherpa-onnx v2.0.3 / Whisper Base INT8 / SenseVoice INT8 / Silero VAD.
+
+Run `scripts/fetch-models.sh` to download and verify the artifacts.
 
 | File | SHA-256 |
 |:--|:--|
@@ -8,4 +10,6 @@ Runtime: sherpa-onnx v2.0.3. Models are downloaded from upstream release assets 
 | `base-decoder.int8.onnx` | `9759d217388a01b3a4c7c15533201067b48ae819c4daafc8624e64b9409dc02d` |
 | `base-encoder.int8.onnx` | `0b8fb1304b6109976038efff5ace81720e00386f3ff6b54ee8c75291ca0a1e11` |
 | `base-tokens.txt` | `b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126` |
+| `sensevoice-tokens.txt` | `f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc` |
+| `sensevoice.int8.onnx` | `12ca1a2ae7ecf3e0019ef2822307ee0b5cadc9196569e379b4c4026f8205276d` |
 | `silero_vad.onnx` | `9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6` |

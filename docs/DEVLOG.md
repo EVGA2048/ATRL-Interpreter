@@ -1,5 +1,14 @@
 # Development log
 
+## 0.5.0
+
+- SenseVoice INT8 assists Chinese–English code-switching. Russian remains on Whisper Base.
+- Reduce Whisper tail padding and VAD endpoint delay; preheat ASR on opening the live page.
+- Up to three concurrent live translation requests; captions update in place and TTS follows transcript order.
+- Animate new provisional text, translated captions and the input meter.
+- Local / online mode selector on translation and interpretation pages. Local mode disables DeepSeek requests and uses offline system voices.
+- Debug build and eight JVM tests passed. Synthetic mixed-language audio reproduced the Whisper translation issue and SenseVoice retained both scripts. Android latency and mixed-speech accuracy await device testing.
+
 ## 0.4.1 — 2026-11-25
 
 - API failures no longer trigger a fresh request for every queued segment: transient failures use a 15-second cooldown, HTTP 429 defaults to 30 seconds and respects numeric Retry-After (bounded to 1–300 seconds); authentication/configuration errors wait for settings save or configuration change.

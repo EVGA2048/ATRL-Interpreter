@@ -40,4 +40,32 @@ class PoliciesTest {
         gate.failed(a,null)
         now=17000;gate.check(a)
     }
+    @Test fun bilingualSelectionPreservesScriptsAndRussian() {
+        assertEquals(Recognition("中文测试 ENGLISH TEST","en+zh"),
+            selectBilingual(Recognition("中文测试 英语文本","zh"),"中文测试ENGLISH TEST"))
+        val russian=Recognition("Сегодня мы изучаем сигналы.","ru")
+        assertEquals(russian,selectBilingual(russian,"中文 English"))
+        val chinese=Recognition("中文测试","zh")
+        assertEquals(chinese,selectBilingual(chinese,"普通话"))
+        assertFalse(correctionKeepsScripts("中文 English","中文 英语"))
+        assertTrue(correctionKeepsScripts("中文 English","中文 English test"))
+        assertEquals("en+ru",mixedCode("Привет English","ru"))
+    }
+    @Test fun prefixAnimationPreservesExistingText() {
+        assertEquals(4,commonPrefixLength("中文测试","中文测试 English"))
+        assertEquals(2,commonPrefixLength("中文测试","中文识别"))
+        assertEquals(0,commonPrefixLength("😀","😁"))
+    }
+    @Test fun mixedOfflineRunsDoNotTreatWholePhraseAsChinese(){
+        assertEquals(listOf(ScriptRun("zh","中文测试 "),ScriptRun("en","English test")),scriptRuns("中文测试 English test"))
+        assertEquals(listOf(ScriptRun("ru","Привет "),ScriptRun("en","English!")),scriptRuns("Привет English!"))
+    }
+    @Test fun playbackRemainsOrderedWhenNetworkCompletesOutOfOrder(){
+        val order=OrderedCompletion()
+        assertEquals(emptyList<Int>(),order.mark(2))
+        assertEquals(listOf(0),order.mark(0))
+        assertEquals(listOf(1,2),order.mark(1))
+        assertEquals(emptyList<Int>(),order.mark(0))
+        order.clear();assertEquals(listOf(0),order.mark(0))
+    }
 }

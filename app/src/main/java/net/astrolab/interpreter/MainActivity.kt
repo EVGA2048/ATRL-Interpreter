@@ -13,6 +13,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.*
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -87,6 +96,10 @@ class MainActivity : ComponentActivity() {
     private val asrJobs = AtomicInteger(0)
     private val recognition = Executors.newSingleThreadExecutor()
     private val network = Executors.newSingleThreadExecutor()
+    private val liveNetwork = Executors.newFixedThreadPool(3)
+    private var finalizer: (() -> Unit)? = null
+    private val playbackOrder=OrderedCompletion()
+    private val warming = AtomicBoolean(false)
     private val modelDownload = Executors.newSingleThreadExecutor()
     private val permission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         if (it) startCapture() else captureStatus = "请允许麦克风权限"
@@ -97,7 +110,7 @@ class MainActivity : ComponentActivity() {
         engine = Engine(applicationContext)
         archive = Archive(this); settings = ApiSettings(this)
         runCatching { settings.load() }.onSuccess { api = it }.onFailure { message = "API 配置读取失败，请重新保存" }
-        terms = archive.terms(); sessions = archive.sessions(); cloud = archive.cloudEnabled()
+        terms = archive.terms(); sessions = archive.sessions(); cloud = archive.cloudEnabled(); engine.setCloudAllowed(cloud)
         tts = TextToSpeech(this) { ttsReady = it == TextToSpeech.SUCCESS }
         setContent {
             val dark = isSystemInDarkTheme()
@@ -112,6 +125,7 @@ class MainActivity : ComponentActivity() {
                             Row(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=8.dp).heightIn(min=52.dp),verticalAlignment=Alignment.CenterVertically){
                                 if(page=="settings"||page=="detail") TextButton(onClick={navigate(if(page=="detail")"notes" else previousPage)},contentPadding=PaddingValues(end=12.dp)){Text("‹ 返回",fontSize=16.sp)}
                                 Text(when(page){"text"->"翻译";"live"->"传译";"notes"->"记录";"terms"->"词库";"settings"->"设置";else->"会话"},fontSize=if(page=="detail"||page=="settings")22.sp else 30.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
+                                if(page=="text"||page=="live")ModeIndicator()
                                 if(page!="settings"&&page!="detail")IconButton(onClick={previousPage=page;navigate("settings")}){NavGlyph("settings",scheme.onSurface,Modifier.size(24.dp))}
                             }
                             key(page){
@@ -141,8 +155,45 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun changeMode(online:Boolean){
+        if(cloud==online)return
+        cloud=online;archive.setCloud(online);engine.setCloudAllowed(online)
+        if(!online)tts?.stop()
+    }
+    @Composable private fun ModeIndicator(){
+        var expanded by remember{mutableStateOf(false)}
+        val color=if(cloud)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        Box{
+            TextButton(onClick={expanded=true},contentPadding=PaddingValues(horizontal=8.dp)){
+                Canvas(Modifier.size(15.dp)){
+                    val stroke=Stroke(1.6.dp.toPx(),cap=StrokeCap.Round)
+                    if(cloud){
+                        drawCircle(color,size.width*.44f,style=stroke)
+                        drawOval(color,topLeft=Offset(size.width*.31f,size.height*.06f),size=Size(size.width*.38f,size.height*.88f),style=stroke)
+                        drawLine(color,Offset(size.width*.07f,size.height*.50f),Offset(size.width*.93f,size.height*.50f),1.4.dp.toPx())
+                    }else{
+                        drawRoundRect(color,topLeft=Offset(size.width*.23f,size.height*.08f),size=Size(size.width*.54f,size.height*.84f),cornerRadius=androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),style=stroke)
+                        drawLine(color,Offset(size.width*.43f,size.height*.76f),Offset(size.width*.57f,size.height*.76f),1.4.dp.toPx(),StrokeCap.Round)
+                    }
+                }
+                Spacer(Modifier.width(5.dp))
+                Text(if(cloud)"联网" else "本地",color=color,fontSize=13.sp,fontWeight=FontWeight.Medium)
+            }
+            DropdownMenu(expanded=expanded,onDismissRequest={expanded=false}){
+                DropdownMenuItem(text={Text("纯本地模式")},trailingIcon={if(!cloud)Text("✓",color=color)},onClick={changeMode(false);expanded=false})
+                DropdownMenuItem(text={Text("网络模式")},trailingIcon={if(cloud)Text("✓",color=color)},onClick={changeMode(true);expanded=false})
+            }
+        }
+    }
     private var previousPage="text"
-    private fun navigate(to:String){page=to;message=""}
+    private fun navigate(to:String){
+        page=to;message=""
+        if(to=="live"&&warming.compareAndSet(false,true)){
+            recognition.execute{
+                try{engine.prepareAsr()}catch(_:Exception){warming.set(false)}
+            }
+        }
+    }
     @Composable private fun NavGlyph(id:String,color:Color,modifier:Modifier=Modifier){
         Canvas(modifier.semantics{contentDescription=if(id=="settings")"设置" else ""}){
             val w=size.width;val h=size.height;val st=1.8.dp.toPx()
@@ -161,10 +212,10 @@ class MainActivity : ComponentActivity() {
             Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(10.dp),content=content)
         }
     }
-    private fun languageName(code:String)=when(code){"zh"->"简体中文";"ru"->"俄语";"en"->"英语";else->"未识别"}
+    private fun languageName(code:String)=when(code){"zh"->"简体中文";"ru"->"俄语";"en"->"英语";"en+zh"->"中英混合";"ru+zh"->"中俄混合";"en+ru"->"俄英混合";"en+ru+zh"->"多语混合";else->"未识别"}
     @Composable private fun LanguageMenu(){
         var expanded by remember{mutableStateOf(false)}
-        val detected=engine.detectText(draft)
+        val detected=mixedCode(draft,engine.detectText(draft))
         val labels=mapOf("Auto" to "自动选择目标语言","Chinese" to "简体中文","Russian" to "俄语","English" to "英语")
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween){
             Text(if(detected.isBlank())"检测语言" else languageName(detected),color=MaterialTheme.colorScheme.primary,fontSize=16.sp,fontWeight=FontWeight.Medium)
@@ -212,10 +263,10 @@ class MainActivity : ComponentActivity() {
         textBusy=true; textResult=null
         network.execute {
             val result=process(raw,config,online,dir,false,emptyList(),glossary)
-            runOnUiThread { if(draft.trim()==raw&&direction==dir)textResult=result.first; mergeTerms(result.second); textBusy=false }
+            runOnUiThread { if(draft.trim()==raw&&direction==dir&&cloud==online)textResult=result.first; if(cloud==online)mergeTerms(result.second); textBusy=false }
         }
     }
-    private fun process(raw:String,config:ApiConfig,online:Boolean,dir:String,speech:Boolean,context:List<Segment>,glossary:List<Term>,source:String=engine.detectText(raw),onLocal:((Segment)->Unit)?=null):Pair<Segment,List<Term>> {
+    private fun process(raw:String,config:ApiConfig,online:Boolean,dir:String,speech:Boolean,context:List<Segment>,glossary:List<Term>,source:String=mixedCode(raw,engine.detectText(raw)),onLocal:((Segment)->Unit)?=null):Pair<Segment,List<Term>> {
         val lang=source.ifBlank{engine.detectText(raw)}
         val target=engine.targetFor(lang,dir)
         val base=Segment(raw,language=lang,target=target)
@@ -224,7 +275,7 @@ class MainActivity : ComponentActivity() {
         if(online&&config.key.isNotBlank()){
             try{
                 val a=engine.analyze(config,raw,context,glossary,target,speech,lang)
-                val corrected=if(speech&&engine.detectText(a.corrected)==lang)a.corrected else raw
+                val corrected=if(speech&&correctionKeepsScripts(raw,a.corrected))a.corrected else raw
                 return base.copy(corrected=corrected,translated=a.translated,scene=a.scene) to a.terms
             }catch(e:Exception){
                 return base.copy(translated=local.getOrDefault(""),error="云端翻译失败"+if(local.isFailure)"，请检查网络或下载离线模型" else "，已使用离线译文") to emptyList()
@@ -246,12 +297,15 @@ class MainActivity : ComponentActivity() {
     @Composable private fun CaptionPair(s:Segment){
         val scheme=MaterialTheme.colorScheme
         val done=s.translated.isNotBlank()
+        val rawColor by animateColorAsState(if(done)scheme.onSurface else scheme.onSurfaceVariant,tween(220),label="caption color")
         Column(Modifier.fillMaxWidth().padding(vertical=5.dp),verticalArrangement=Arrangement.spacedBy(3.dp)){
             SelectionContainer{
-                Text(s.corrected.ifBlank{s.raw},fontSize=16.sp,lineHeight=23.sp,color=if(done)scheme.onSurface else scheme.onSurfaceVariant)
+                Text(s.corrected.ifBlank{s.raw},fontSize=16.sp,lineHeight=23.sp,color=rawColor)
             }
-            if(done)SelectionContainer{
-                Text(s.translated,fontSize=19.sp,lineHeight=27.sp,color=scheme.primary,fontWeight=FontWeight.Medium)
+            AnimatedVisibility(visible=done,enter=fadeIn(tween(220))+expandVertically(tween(180),expandFrom=Alignment.Top)){
+                SelectionContainer{
+                    Text(s.translated,fontSize=19.sp,lineHeight=27.sp,color=scheme.primary,fontWeight=FontWeight.Medium)
+                }
             }
             if(s.error.isNotBlank())Text(s.error,fontSize=11.sp,color=scheme.onSurfaceVariant)
             if(s.corrected.isNotBlank()&&s.corrected!=s.raw){
@@ -259,6 +313,33 @@ class MainActivity : ComponentActivity() {
                 Text(if(showRaw)s.raw else "查看原始识别",fontSize=11.sp,color=scheme.onSurfaceVariant,modifier=Modifier.clickable{showRaw=!showRaw})
             }
         }
+    }
+    @Composable private fun PartialCaption(value:String){
+        var previous by remember{mutableStateOf("")}
+        var unchanged by remember{mutableIntStateOf(0)}
+        val reveal=remember{Animatable(1f)}
+        LaunchedEffect(value){
+            unchanged=commonPrefixLength(previous,value)
+            previous=value
+            reveal.snapTo(.25f)
+            reveal.animateTo(1f,tween(180))
+        }
+        val color=MaterialTheme.colorScheme.onSurfaceVariant
+        val prefix=unchanged.coerceAtMost(value.length)
+        val display=buildAnnotatedString{
+            withStyle(SpanStyle(color=color)){append(value.substring(0,prefix))}
+            withStyle(SpanStyle(color=color.copy(alpha=.35f+.65f*reveal.value))){append(value.substring(prefix))}
+        }
+        Row(Modifier.fillMaxWidth().padding(vertical=5.dp),verticalAlignment=Alignment.CenterVertically){
+            Text(display,fontSize=16.sp,lineHeight=23.sp,modifier=Modifier.weight(1f,fill=false))
+            Spacer(Modifier.width(5.dp))
+            ListeningDot()
+        }
+    }
+    @Composable private fun ListeningDot(){
+        val transition=rememberInfiniteTransition(label="listening")
+        val opacity by transition.animateFloat(.35f,1f,infiniteRepeatable(tween(650),RepeatMode.Reverse),label="pulse")
+        Box(Modifier.size(6.dp).alpha(opacity).background(MaterialTheme.colorScheme.primary,androidx.compose.foundation.shape.CircleShape))
     }
     @Composable private fun GroupTime(s:Segment){
         Row(Modifier.fillMaxWidth().padding(top=14.dp,bottom=4.dp),verticalAlignment=Alignment.CenterVertically){
@@ -298,9 +379,12 @@ class MainActivity : ComponentActivity() {
                     }
                     item(key="tail"){
                         if(draft!=null&&draft.text.isNotBlank()){
-                            Text(draft.text,fontSize=16.sp,lineHeight=23.sp,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.78f),modifier=Modifier.padding(vertical=5.dp))
+                            PartialCaption(draft.text)
                         } else if(items.isEmpty()){
-                            Text(if(recording)"正在聆听…" else "字幕将在这里显示",fontSize=16.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(vertical=12.dp))
+                            Row(Modifier.padding(vertical=12.dp),verticalAlignment=Alignment.CenterVertically){
+                                Text(if(recording)"正在聆听…" else "字幕将在这里显示",fontSize=16.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                                if(recording){Spacer(Modifier.width(6.dp));ListeningDot()}
+                            }
                         }
                     }
                 }
@@ -309,8 +393,9 @@ class MainActivity : ComponentActivity() {
                 TextButton(onClick={viewed=current?.time;navigate("detail")}){Text("查看会话总结")}
             }
             Row(Modifier.fillMaxWidth().padding(top=8.dp),verticalAlignment=Alignment.CenterVertically){
+                val smoothLevel by animateFloatAsState(level,tween(110),label="audio level")
                 Canvas(Modifier.width(95.dp).height(30.dp)){
-                    for(i in 0..17){val x=size.width*(i+.5f)/18;val h=1.5f+level*size.height*.44f*(.3f+(i%9)/12f);drawLine(cobalt,Offset(x,size.height/2-h),Offset(x,size.height/2+h),strokeWidth=2.dp.toPx(),cap=StrokeCap.Round)}
+                    for(i in 0..17){val x=size.width*(i+.5f)/18;val h=1.5f+smoothLevel*size.height*.44f*(.3f+(i%9)/12f);drawLine(cobalt,Offset(x,size.height/2-h),Offset(x,size.height/2+h),strokeWidth=2.dp.toPx(),cap=StrokeCap.Round)}
                 }
                 Spacer(Modifier.weight(1f));Text("朗读",fontSize=13.sp)
                 Switch(checked=autoSpeak,onCheckedChange={autoSpeak=it},modifier=Modifier.padding(start=6.dp))
@@ -332,8 +417,7 @@ class MainActivity : ComponentActivity() {
         CaptureService.stopRequested = { runOnUiThread { stopCapture() } }
         try { startForegroundService(android.content.Intent(this,CaptureService::class.java)) }
         catch(e:Exception) { active.set(false); CaptureService.stopRequested=null; captureStatus="无法启动录音服务：${e.message}"; return }
-        recording=true; captureStatus="正在聆听"; pending=0;partial=null;partialGeneration=0;captureWarning=""
-        val config=api; val online=cloud
+        recording=true; captureStatus="正在聆听"; pending=0;partial=null;partialGeneration=0;captureWarning="";finalizer=null;playbackOrder.clear()
         Thread {
             var mic:AudioRecord?=null
             var vad:Vad?=null
@@ -344,8 +428,8 @@ class MainActivity : ComponentActivity() {
                 val input=AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION,16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,maxOf(min,6400))
                 mic=input;check(input.state==AudioRecord.STATE_INITIALIZED);input.startRecording()
                 val detector=Vad(assets,VadModelConfig(sileroVadModelConfig=SileroVadModelConfig(
-                    model="asr/silero_vad.onnx",threshold=0.5f,minSilenceDuration=0.38f,minSpeechDuration=0.25f,
-                    windowSize=512,maxSpeechDuration=5.0f),sampleRate=16000,numThreads=1,provider="cpu"))
+                    model="asr/silero_vad.onnx",threshold=0.5f,minSilenceDuration=0.30f,minSpeechDuration=0.25f,
+                    windowSize=512,maxSpeechDuration=4.5f),sampleRate=16000,numThreads=1,provider="cpu"))
                 vad=detector
                 val block=ShortArray(512)
                 val origin=System.currentTimeMillis()
@@ -371,7 +455,7 @@ class MainActivity : ComponentActivity() {
                                     val result=engine.transcribe(samples)
                                     runOnUiThread {
                                         if(current?.time==started&&partialGeneration<=epoch)partial=null
-                                        if(result.text.isNotBlank())enqueue(result.text,result.language,started,config,online,from,until)
+                                        if(result.text.isNotBlank())enqueue(result.text,result.language,started,api,cloud,from,until)
                                     }
                                 } catch(e:Throwable) {runOnUiThread{captureWarning="识别失败，请检查语音模型"}}
                                 finally {asrJobs.decrementAndGet()}
@@ -397,7 +481,7 @@ class MainActivity : ComponentActivity() {
                             previewBlocks.addAll(preroll);previewSamples=preroll.sumOf{it.size}
                         }
                         if(previewSamples<16000*8){previewBlocks.add(samples);previewSamples+=n}
-                        if(previewSamples>=20000 && previewSamples-lastPreview>=24000 && asrJobs.compareAndSet(0,1)){
+                        if(previewSamples>=19200 && previewSamples-lastPreview>=19200 && asrJobs.compareAndSet(0,1)){
                             val snapshot=FloatArray(previewSamples);var pos=0
                             for(chunk in previewBlocks){chunk.copyInto(snapshot,pos);pos+=chunk.size}
                             val epoch=generation.get();lastPreview=previewSamples
@@ -422,7 +506,8 @@ class MainActivity : ComponentActivity() {
                 val err=error
                 runOnUiThread {recording=false;finishing=true;level=0f;partial=null;captureStatus=err?:"正在完成识别…"}
                 recognition.execute {runOnUiThread {
-                    network.execute { runOnUiThread {finishSession(started,config,online,err)} }
+                    finalizer={finishSession(started,api,cloud,err)}
+                    finishWhenReady()
                 }}
             }
         }.start()
@@ -445,11 +530,11 @@ class MainActivity : ComponentActivity() {
             }
             translated
         }
-        network.execute {
+        liveNetwork.execute {
             val snapshot=currentContextForWorker(id,pos)
             val analysis=if(online&&config.key.isNotBlank())runCatching{engine.analyze(config,raw,snapshot.first,snapshot.second,target,true,lang)} else null
             val a=analysis?.getOrNull()
-            val final=if(a!=null)base.copy(corrected=if(engine.detectText(a.corrected)==lang)a.corrected else raw,translated=a.translated,scene=a.scene)
+            val final=if(a!=null)base.copy(corrected=if(correctionKeepsScripts(raw,a.corrected))a.corrected else raw,translated=a.translated,scene=a.scene)
             else {
                 val translated=runCatching{local.get(15,java.util.concurrent.TimeUnit.SECONDS)}.getOrNull().orEmpty()
                 base.copy(translated=translated,error=if(translated.isBlank())"翻译不可用，请检查网络或离线语言包" else "")
@@ -457,9 +542,19 @@ class MainActivity : ComponentActivity() {
             runOnUiThread {
                 updateSegment(id,pos,final);mergeTerms(a?.terms.orEmpty())
                 pending=(pending-1).coerceAtLeast(0)
-                if(autoSpeak&&final.translated.isNotBlank())speak(final.translated,final.target)
+                for(index in playbackOrder.mark(pos)){
+                    val ready=current?.takeIf{it.time==id}?.items?.getOrNull(index)
+                    if(autoSpeak&&ready!=null&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
+                }
+                finishWhenReady()
             }
         }
+    }
+    private fun finishWhenReady(){
+        if(pending!=0)return
+        val finish=finalizer?:return
+        finalizer=null
+        finish()
     }
     private fun currentContextForWorker(id:Long,pos:Int):Pair<List<Segment>,List<Term>> {
         val task=java.util.concurrent.FutureTask { (current?.takeIf{it.time==id}?.items?.take(pos)?:emptyList()) to terms }
@@ -628,7 +723,7 @@ class MainActivity : ComponentActivity() {
             Text("DeepSeek Flash",fontSize=21.sp)
             Row(verticalAlignment=Alignment.CenterVertically){
                 Text("启用云端语义增强",modifier=Modifier.weight(1f))
-                Switch(checked=cloud,onCheckedChange={cloud=it;archive.setCloud(it)})
+                Switch(checked=cloud,onCheckedChange={changeMode(it)})
             }
             Text("云端增强将发送输入文字、近期会话上下文及确认术语。关闭后仅本地处理。",fontSize=12.sp)
             OutlinedTextField(edit.key,{edit=edit.copy(key=it)},label={Text("API Key")},modifier=Modifier.fillMaxWidth(),singleLine=true,
@@ -654,14 +749,21 @@ class MainActivity : ComponentActivity() {
                 }
             },enabled=!downloading,shape=corner,modifier=Modifier.fillMaxWidth()){Text(if(downloading)"下载中…" else "下载 / 检查离线翻译模型")}
         }
-        Panel {Text("版本 0.4.1");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
+        Panel {Text("版本 0.5.0");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
     }
     private fun speak(text:String,language:String="") {
         if(text.isBlank())return
         if(!ttsReady){message="系统语音合成不可用";return}
         val t=tts?:return
-        val r=t.setLanguage(when(language.ifBlank{engine.detectText(text)}){"zh"->Locale.SIMPLIFIED_CHINESE;"en"->Locale.US;else->Locale("ru","RU")})
-        if(r==TextToSpeech.LANG_MISSING_DATA||r==TextToSpeech.LANG_NOT_SUPPORTED){message="系统缺少对应语音包";return}
+        val locale=when(language.ifBlank{engine.detectText(text)}){"zh"->Locale.SIMPLIFIED_CHINESE;"en"->Locale.US;else->Locale("ru","RU")}
+        if(!cloud){
+            val voice=t.voices?.filter{!it.isNetworkConnectionRequired&&it.locale.language==locale.language}
+                ?.maxByOrNull{(if(it.locale==locale)100000 else 0)+it.quality}
+            if(voice==null||t.setVoice(voice)!=TextToSpeech.SUCCESS){message="请安装本地语音包";return}
+        }else{
+            val r=t.setLanguage(locale)
+            if(r==TextToSpeech.LANG_MISSING_DATA||r==TextToSpeech.LANG_NOT_SUPPORTED){message="系统缺少对应语音包";return}
+        }
         t.speak(text,TextToSpeech.QUEUE_ADD,null,System.nanoTime().toString())
     }
     override fun onDestroy(){if(isFinishing)stopCapture();super.onDestroy()}

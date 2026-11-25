@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.4.1-2859CC?style=flat-square" alt="Version 0.4.1">
+  <img src="https://img.shields.io/badge/version-0.5.0-2859CC?style=flat-square" alt="Version 0.5.0">
   <img src="https://img.shields.io/badge/Android-8.0%2B-536275?style=flat-square" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/ABI-ARM64-82996a?style=flat-square" alt="ARM64">
   <img src="https://img.shields.io/badge/status-development-74747B?style=flat-square" alt="In development">
@@ -17,7 +17,7 @@
 
 **Interpreter** 是 ASTROLAB 的 Android 实时传译工具，支持中文、英语与俄语的语音识别、文字互译、双语字幕、会话总结与专业词库。
 
-语音识别在本地运行，DeepSeek Flash 结合上下文和词库辅助翻译与纠错。
+语音识别在本地运行，DeepSeek Flash 结合上下文和词库辅助翻译与纠错。翻译和传译页右上角可切换本地与联网模式。
 
 <a id="features"></a>
 
@@ -32,7 +32,7 @@
 | GLOSSARY | 自动提取术语候选，分组、搜索、筛选、例句及确认 |
 | AUDIO | 前台麦克风服务、系统 TTS、通知栏结束会话 |
 
-字幕按语句对应排列，停顿超过 60 秒后另起一组。Whisper 采用分段识别与滚动预识别。
+字幕按语句对应排列，停顿超过 60 秒后另起一组。Whisper 采用分段识别与滚动预识别，中英混说由 SenseVoice 辅助识别。
 
 自动模式下，中文译为俄语，俄语与英语译为简体中文。文字翻译也可以指定中文、英语或俄语为目标语言。
 
@@ -52,6 +52,8 @@
                    Whisper Base INT8
                     zh / en / ru LID
                             |
+                  SenseVoice (zh / en)
+                            |
              provisional -> final transcript
                             |
                 +-----------+-----------+
@@ -70,13 +72,13 @@
 |:--|:--|
 | UI | Kotlin / Jetpack Compose |
 | VAD | Silero VAD |
-| ASR | sherpa-onnx 2.0.3 / multilingual Whisper Base INT8 |
+| ASR | sherpa-onnx 2.0.3 / Whisper Base INT8 / SenseVoice INT8 |
 | Offline translation | Google ML Kit Translate 17.0.3 |
 | Online enhancement | DeepSeek Flash, HTTPS / JSON |
 | Storage | Android app-private storage |
 | Credentials | Android Keystore / AES-GCM |
 
-ASR 模型随 APK 安装，离线翻译与 TTS 需相应语言包。云端增强仅处理文本及相关上下文，录音不上传、不保存。
+ASR 模型随 APK 安装。本地模式使用 ML Kit 翻译及离线 TTS，需提前下载语言包；联网模式使用 Flash 增强翻译、纠错、总结及术语提取。
 
 <a id="build"></a>
 
@@ -101,23 +103,24 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## 04 / Development
 
-当前版本 **0.4.1**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
+当前版本 **0.5.0**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
 
 | 版本 | 主要变化 |
 |:--|:--|
+| 0.5.0 | 中英混说识别、并行翻译、字幕动画、本地与联网模式 |
 | 0.4.1 | 云端失败退避、相关术语筛选、音量更新节流、过期文字结果隔离 |
 | 0.4.0 | 连续字幕、准流式识别、60 秒时间分组、分类词库 |
 | 0.3.0 | 三语自动识别、Whisper Base INT8、重新组织主界面 |
 | 0.2.0 | 本地 ASR、语义增强、记录、总结、术语与 TTS |
 | 0.1.0 | Android 工程与真机录音原型 |
 
-0.4.1 仍处于开发阶段，主要优化识别延迟与长会话稳定性。
+0.5.0 仍处于开发阶段，主要优化混合语音识别与传译延迟。
 
 详细记录：[DEVLOG](docs/DEVLOG.md) / [App Icon Standard](docs/ASTROLAB-APP-ICON-STANDARD.md)。
 
 ### Third-party components
 
-上游项目：[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)、[Whisper](https://github.com/openai/whisper)、[Silero VAD](https://github.com/snakers4/silero-vad)、[ML Kit](https://developers.google.com/ml-kit/language/translation)。第三方组件适用各自的许可证。Interpreter 源码许可证暂未确定。
+上游项目：[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)、[Whisper](https://github.com/openai/whisper)、[SenseVoice](https://github.com/FunAudioLLM/SenseVoice)、[Silero VAD](https://github.com/snakers4/silero-vad)、[ML Kit](https://developers.google.com/ml-kit/language/translation)。第三方组件适用各自的许可证。Interpreter 源码许可证暂未确定。
 
 <a id="english"></a>
 
