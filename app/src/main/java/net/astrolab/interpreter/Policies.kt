@@ -144,3 +144,28 @@ internal fun asrLanguage(recognition:Recognition):String =
 
 internal fun validCloudTranslation(raw:String,translated:String):Boolean =
     translated.isNotBlank()&&!hasDecodeLoop(translated)&&translated.length<=maxOf(180,raw.length*8)
+
+/** Token-level LCS highlights only inserted/replaced words, including Han characters. */
+private val editTokens=Regex("[\\p{IsHan}]|[\\p{L}\\p{M}\\p{N}&&[^\\p{IsHan}]]+|[^\\s]")
+internal fun changedRanges(before:String?,after:String):List<IntRange>{
+    if(before==null||before==after)return emptyList()
+    val a=editTokens.findAll(before).toList();val b=editTokens.findAll(after).toList()
+    if(a.size>256||b.size>256){
+        val start=commonPrefixLength(before,after)
+        var end=after.length;var oldEnd=before.length
+        while(end>start&&oldEnd>start&&after[end-1]==before[oldEnd-1]){end--;oldEnd--}
+        return if(start<end)listOf(start until end) else emptyList()
+    }
+    val dp=Array(a.size+1){IntArray(b.size+1)}
+    for(i in a.indices.reversed())for(j in b.indices.reversed()){
+        dp[i][j]=if(a[i].value==b[j].value)1+dp[i+1][j+1] else maxOf(dp[i+1][j],dp[i][j+1])
+    }
+    val keep=BooleanArray(b.size)
+    var i=0;var j=0
+    while(i<a.size&&j<b.size){
+        if(a[i].value==b[j].value){keep[j]=true;i++;j++}
+        else if(dp[i+1][j]>=dp[i][j+1])i++ else j++
+    }
+    return b.indices.filter{!keep[it]}.map{b[it].range}
+}
+internal fun canReplaceRevision(existing:Segment,expected:Int)=existing.manualRevision==expected

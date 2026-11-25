@@ -1,6 +1,6 @@
 # Model and runtime manifest
 
-sherpa-onnx v2.0.3 / Whisper Base INT8 / SenseVoice INT8 / Silero VAD.
+sherpa-onnx v2.0.3 / Whisper Base INT8 / SenseVoice INT8 / T-one CTC / Silero VAD.
 
 Run `scripts/fetch-models.sh` to download and verify the artifacts.
 
@@ -13,3 +13,5 @@ Run `scripts/fetch-models.sh` to download and verify the artifacts.
 | `sensevoice-tokens.txt` | `f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc` |
 | `sensevoice.int8.onnx` | `12ca1a2ae7ecf3e0019ef2822307ee0b5cadc9196569e379b4c4026f8205276d` |
 | `silero_vad.onnx` | `9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6` |
+| `tone-ru.onnx` | `5ded080e2a6c86ecc11bcb0902d77524eb3e8b0844cb0c0754347f5aafb4dabc` |
+| `tone-ru-tokens.txt` | `27f7b3ba2096c572375fba1a6b29af1f80d86e08a329940612908112695f97e0` |

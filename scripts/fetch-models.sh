@@ -15,4 +15,9 @@ tar -xjf "$tmp/sensevoice.tar.bz2" -C "$tmp" "$sensevoice/model.int8.onnx" "$sen
 cp "$tmp/$sensevoice/model.int8.onnx" app/src/main/assets/asr/sensevoice.int8.onnx
 cp "$tmp/$sensevoice/tokens.txt" app/src/main/assets/asr/sensevoice-tokens.txt
 
+tone=sherpa-onnx-streaming-t-one-russian-2025-09-08
+curl -fL "$base/asr-models/$tone.tar.bz2" -o "$tmp/tone.tar.bz2"
+tar -xjf "$tmp/tone.tar.bz2" -C "$tmp" "$tone/model.onnx" "$tone/tokens.txt"
+cp "$tmp/$tone/model.onnx" app/src/main/assets/asr/tone-ru.onnx
+cp "$tmp/$tone/tokens.txt" app/src/main/assets/asr/tone-ru-tokens.txt
 shasum -a 256 -c scripts/models.sha256

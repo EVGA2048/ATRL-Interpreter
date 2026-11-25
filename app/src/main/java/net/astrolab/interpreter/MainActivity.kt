@@ -15,6 +15,14 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.expandVertically
@@ -90,6 +98,11 @@ class MainActivity : ComponentActivity() {
     private var finishing by mutableStateOf(false)
     private var pending by mutableIntStateOf(0)
     private var partial by mutableStateOf<Recognition?>(null)
+    private var russianStreaming by mutableStateOf(false)
+    private val streamingWorker=Executors.newSingleThreadExecutor()
+    private val editWorker=Executors.newFixedThreadPool(2)
+    private data class SentenceEdit(val session:Long,val index:Int,val source:Boolean,val before:String,val selection:TextRange)
+    private var sentenceEdit by mutableStateOf<SentenceEdit?>(null)
     private var partialGeneration=-1
     private var captureWarning by mutableStateOf("")
     private val localTranslation=Executors.newSingleThreadExecutor()
@@ -128,6 +141,7 @@ class MainActivity : ComponentActivity() {
                 else lightColorScheme(primary=cobalt,background=Color(0xFFF5F5F7),surface=Color.White,surfaceVariant=Color(0xFFE9E9ED),onSurface=Color(0xFF17171A),onSurfaceVariant=Color(0xFF74747B),outline=Color(0xFFD7D7DB),secondary=cobalt)
             MaterialTheme(colorScheme=scheme,shapes=Shapes(small=corner,medium=corner,large=corner)){
                 Surface(Modifier.fillMaxSize(),color=scheme.background){
+                    sentenceEdit?.let{request->key(request){SentenceEditDialog(request)}}
                     BackHandler(page !in listOf("text","live","notes","terms")){navigate(if(page=="detail")"notes" else previousPage)}
                     BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().imePadding()){
                         val wide=maxWidth>=650.dp
@@ -344,22 +358,102 @@ class MainActivity : ComponentActivity() {
     }
     private fun timeLabel(time:Long)=java.text.SimpleDateFormat("HH:mm",Locale.getDefault()).format(java.util.Date(time))
     private fun newGroup(items:List<Segment>,index:Int)=startsNewGroup(items.getOrNull(index-1)?.time,items[index].startTime)
-    @Composable private fun CaptionPair(s:Segment){
+    @Composable private fun EditableCaption(value:String,before:String?,color:Color,fontSize:Int,lineHeight:Int,source:Boolean,onEdit:(TextRange)->Unit){
+        val scheme=MaterialTheme.colorScheme
+        var layout by remember(value){mutableStateOf<TextLayoutResult?>(null)}
+        val accent=if(source)scheme.primary else if(isSystemInDarkTheme())Color(0xFFD3E0FF) else Color(0xFF123A91)
+        val annotated=remember(value,before,accent,scheme.primary){
+            buildAnnotatedString{
+                append(value)
+                changedRanges(before,value).forEach{range->
+                    addStyle(SpanStyle(color=accent,background=scheme.primary.copy(alpha=.13f),fontWeight=FontWeight.SemiBold,textDecoration=TextDecoration.Underline),range.first,range.last+1)
+                }
+            }
+        }
+        Text(annotated,fontSize=fontSize.sp,lineHeight=lineHeight.sp,color=color,
+            fontWeight=if(source)FontWeight.Normal else FontWeight.Medium,
+            onTextLayout={layout=it},modifier=Modifier.fillMaxWidth().pointerInput(value){
+                detectTapGestures(onTap={point->
+                    val l=layout?:return@detectTapGestures
+                    if(value.isNotEmpty()){
+                        val offset=l.getOffsetForPosition(point).coerceIn(0,value.lastIndex)
+                        onEdit(l.getWordBoundary(offset))
+                    }
+                })
+            }.semantics{contentDescription=value})
+    }
+    @Composable private fun SentenceEditDialog(request:SentenceEdit){
+        var value by remember{mutableStateOf(TextFieldValue(request.before,request.selection))}
+        val focus=remember{FocusRequester()}
+        val keyboard=LocalSoftwareKeyboardController.current
+        AlertDialog(onDismissRequest={sentenceEdit=null},title={Text(if(request.source)"编辑原文" else "编辑译文")},
+            text={
+                OutlinedTextField(value,{value=it},modifier=Modifier.fillMaxWidth().focusRequester(focus),minLines=3,maxLines=7)
+                LaunchedEffect(Unit){focus.requestFocus();keyboard?.show()}
+            },confirmButton={TextButton(onClick={saveSentenceEdit(request,value.text.trim());sentenceEdit=null},enabled=value.text.isNotBlank()&&value.text.trim()!=request.before){Text("保存")}},
+            dismissButton={TextButton(onClick={sentenceEdit=null}){Text("取消")}})
+    }
+    private fun sessionFor(id:Long)=current?.takeIf{it.time==id}?:sessions.firstOrNull{it.time==id}
+    private fun replaceSentence(id:Long,index:Int,expected:Int,next:Segment):Boolean{
+        val s=sessionFor(id)?:return false
+        val old=s.items.getOrNull(index)?:return false
+        if(!canReplaceRevision(old,expected))return false
+        val list=s.items.toMutableList();list[index]=next
+        val updated=s.copy(items=list,summary="")
+        if(current?.time==id)current=updated
+        persist(updated)
+        return true
+    }
+    private fun saveSentenceEdit(request:SentenceEdit,value:String){
+        val s=sessionFor(request.session)?:return
+        val old=s.items.getOrNull(request.index)?:return
+        val revision=old.manualRevision+1
+        val next=if(request.source){
+            val lang=asrLanguage(Recognition(value,engine.detectText(value)))
+            val target=old.target.ifBlank{engine.targetFor(lang,"Auto")}
+            old.copy(corrected=value,translated="",language=lang,target=target,error="重新翻译中",
+                manualRevision=revision,sourceBeforeEdit=old.sourceBeforeEdit?:request.before,
+                translationBeforeEdit=old.translationBeforeEdit?:old.translated.takeIf{it.isNotBlank()})
+        }else old.copy(translated=value,error="",manualRevision=revision,translationBeforeEdit=old.translationBeforeEdit?:request.before)
+        if(!replaceSentence(request.session,request.index,old.manualRevision,next)||!request.source)return
+        val online=cloud;val config=api;val glossary=terms;val context=s.items.take(request.index)
+        editWorker.execute{
+            val a=if(online&&config.key.isNotBlank())runCatching{engine.analyze(config,value,context,glossary,next.target,false,next.language)}.getOrNull() else null
+            val translated=a?.translated?:runCatching{engine.offline(value,next.language,next.target)}.getOrDefault("")
+            val updated=next.copy(translated=translated,scene=a?.scene?:next.scene,error=if(translated.isBlank())"重新翻译失败，点按原文重试" else if(a==null&&online&&config.key.isNotBlank())"本地译文" else "")
+            runOnUiThread{replaceSentence(request.session,request.index,revision,updated)}
+        }
+    }
+    @Composable private fun CaptionPair(s:Segment,sessionId:Long,index:Int){
         val scheme=MaterialTheme.colorScheme
         val done=s.translated.isNotBlank()
         val rawColor by animateColorAsState(if(done)scheme.onSurface else scheme.onSurfaceVariant,tween(220),label="caption color")
         var showRaw by remember(s.raw){mutableStateOf(false)}
         val corrected=s.corrected.isNotBlank()&&s.corrected!=s.raw
         Column(Modifier.fillMaxWidth().padding(vertical=7.dp),verticalArrangement=Arrangement.spacedBy(3.dp)){
-            SelectionContainer{
-                Text(if(showRaw)s.raw else s.corrected.ifBlank{s.raw},fontSize=16.sp,lineHeight=24.sp,color=rawColor)
+            Text(java.text.SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(java.util.Date(s.startTime)),
+                fontSize=10.sp,letterSpacing=.25.sp,color=scheme.onSurfaceVariant.copy(alpha=.78f),
+                fontWeight=FontWeight.Medium)
+            if(showRaw)SelectionContainer{Text(s.raw,fontSize=16.sp,lineHeight=24.sp,color=rawColor)}
+            else {
+                val displayed=s.corrected.ifBlank{s.raw}
+                EditableCaption(displayed,s.sourceBeforeEdit,rawColor,16,24,true){range->
+                    sentenceEdit=SentenceEdit(sessionId,index,true,displayed,range)
+                }
             }
             AnimatedVisibility(visible=done,enter=fadeIn(tween(220))+expandVertically(tween(180),expandFrom=Alignment.Top)){
-                SelectionContainer{
-                    Text(s.translated,fontSize=20.sp,lineHeight=29.sp,color=scheme.primary,fontWeight=FontWeight.Medium)
+                EditableCaption(s.translated,s.translationBeforeEdit,scheme.primary,20,29,false){range->
+                    sentenceEdit=SentenceEdit(sessionId,index,false,s.translated,range)
                 }
             }
             if(s.error.isNotBlank())Text(s.error,fontSize=11.sp,color=scheme.onSurfaceVariant)
+            if(s.manualRevision>0)Row(verticalAlignment=Alignment.CenterVertically){
+                Text("已修正",fontSize=11.sp,color=scheme.primary)
+                if(s.translated.isNotBlank()){
+                    Spacer(Modifier.width(8.dp))
+                    Text("朗读",fontSize=11.sp,color=scheme.primary,modifier=Modifier.clickable{speak(s.translated,s.target)})
+                }
+            }
             if(corrected&&showRaw)Text("显示校正文本",fontSize=11.sp,color=scheme.onSurfaceVariant,modifier=Modifier.clickable{showRaw=false})
             else if(corrected)Text("原文",fontSize=11.sp,color=scheme.onSurfaceVariant,modifier=Modifier.clickable{showRaw=true})
         }
@@ -414,7 +508,17 @@ class MainActivity : ComponentActivity() {
         }
         Column(Modifier.fillMaxSize()){
             Row(Modifier.fillMaxWidth().padding(horizontal=4.dp,vertical=4.dp),verticalAlignment=Alignment.CenterVertically){
-                Text(captureStatus,fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.weight(1f))
+                var sourceMenu by remember{mutableStateOf(false)}
+                Box{
+                    TextButton(onClick={sourceMenu=true},enabled=!recording&&!finishing,contentPadding=PaddingValues(horizontal=4.dp)){
+                        Text(if(russianStreaming)"俄语实时 ▾" else "自动识别 ▾",fontSize=13.sp)
+                    }
+                    DropdownMenu(expanded=sourceMenu,onDismissRequest={sourceMenu=false}){
+                        DropdownMenuItem(text={Text("自动识别")},onClick={russianStreaming=false;sourceMenu=false})
+                        DropdownMenuItem(text={Text("俄语实时")},onClick={russianStreaming=true;sourceMenu=false})
+                    }
+                }
+                Text(captureStatus,fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.weight(1f).padding(start=6.dp))
                 if(pending>0)Text("翻译中 $pending",fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 if(!following)TextButton(onClick={following=true;}){Text("回到最新")}
             }
@@ -425,7 +529,7 @@ class MainActivity : ComponentActivity() {
                     itemsIndexed(items,key={i,_->i}){i,s->
                         if(newGroup(items,i))GroupTime(s)
                         if(i==0||newGroup(items,i)||items[i-1].language!=s.language)Text(languageName(s.language.ifBlank{engine.detectText(s.raw)}),fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(top=3.dp))
-                        CaptionPair(s)
+                        CaptionPair(s,current!!.time,i)
                     }
                     item(key="tail"){
                         if(draft!=null&&draft.text.isNotBlank()){
@@ -481,6 +585,10 @@ class MainActivity : ComponentActivity() {
         try { startForegroundService(android.content.Intent(this,CaptureService::class.java)) }
         catch(e:Exception) { active.set(false); CaptureService.stopRequested=null; captureStatus="无法启动录音服务：${e.message}"; return }
         recording=true; captureStatus="正在聆听"; pending=0;partial=null;partialGeneration=-1;captureWarning="";meterHistory=List(30){0f};finalizer=null;playbackOrder.clear()
+        val useNative=russianStreaming
+        val nativeFailed=AtomicBoolean(false)
+        val nativeJobs=AtomicInteger(0)
+        val native=if(useNative)StreamingRussian(assets) else null
         Thread {
             var mic:AudioRecord?=null
             var vad:Vad?=null
@@ -503,6 +611,36 @@ class MainActivity : ComponentActivity() {
                 var previewSamples=0
                 var lastPreview=0
                 var lastMeter=0L
+                var nativeEpoch=-1
+                var nativeSamples=0
+                val nativeBlocks=ArrayList<FloatArray>()
+                fun submitNative(epoch:Int,begin:Boolean){
+                    if(native==null||nativeFailed.get())return
+                    if(nativeJobs.get()>=12){
+                        nativeFailed.set(true)
+                        runOnUiThread{captureWarning="流式识别积压，已切换滚动识别"}
+                        return
+                    }
+                    val audio=FloatArray(nativeSamples);var offset=0
+                    for(chunk in nativeBlocks){chunk.copyInto(audio,offset);offset+=chunk.size}
+                    nativeBlocks.clear();nativeSamples=0
+                    nativeJobs.incrementAndGet()
+                    streamingWorker.execute{
+                        try{
+                            if(nativeFailed.get()||generation.get()!=epoch)return@execute
+                            if(begin)native.start()
+                            val text=native.feed(audio)
+                            if(text.isNotBlank()&&!hasDecodeLoop(text)&&generation.get()==epoch&&active.get())runOnUiThread{
+                                if(current?.time==started&&active.get()&&generation.get()==epoch){
+                                    partialGeneration=epoch;partial=Recognition(text,"ru")
+                                }
+                            }
+                        }catch(e:Exception){
+                            nativeFailed.set(true)
+                            runOnUiThread{captureWarning="流式模型不可用，已切换滚动识别"}
+                        }finally{nativeJobs.decrementAndGet()}
+                    }
+                }
                 fun drain():Boolean {
                     var drained=false
                     while(!detector.empty()) {
@@ -553,13 +691,21 @@ class MainActivity : ComponentActivity() {
                     detector.acceptWaveform(samples)
                     if(drain()){
                         previewBlocks.clear();previewSamples=0;lastPreview=0;preroll.clear()
+                        nativeBlocks.clear();nativeSamples=0;nativeEpoch=-1
                     }
                     if(detector.isSpeechDetected()){
                         if(previewBlocks.isEmpty()){
                             previewBlocks.addAll(preroll);previewSamples=preroll.sumOf{it.size}
                         }
                         if(previewSamples<16000*8){previewBlocks.add(samples);previewSamples+=n}
-                        if(previewSamples>=25600 && previewSamples-lastPreview>=24000 && asrJobs.compareAndSet(0,1)){
+                        if(useNative&&!nativeFailed.get()){
+                            val epoch=generation.get()
+                            val begin=nativeEpoch!=epoch
+                            if(begin){nativeEpoch=epoch;nativeBlocks.addAll(preroll);nativeSamples+=preroll.sumOf{it.size}}
+                            nativeBlocks.add(samples);nativeSamples+=n
+                            if(begin||nativeSamples>=2560)submitNative(epoch,begin)
+                        }
+                        if((!useNative||nativeFailed.get())&&previewSamples>=25600 && previewSamples-lastPreview>=24000 && asrJobs.compareAndSet(0,1)){
                             val snapshot=FloatArray(previewSamples);var pos=0
                             for(chunk in previewBlocks){chunk.copyInto(snapshot,pos);pos+=chunk.size}
                             val epoch=generation.get();lastPreview=previewSamples
@@ -585,6 +731,7 @@ class MainActivity : ComponentActivity() {
             } catch(e:Exception){error=e.message?: "录音失败"}
             finally {
                 runCatching{mic?.stop()};mic?.release();vad?.release();active.set(false)
+                if(native!=null)streamingWorker.execute{native.close()}
                 val err=error
                 runOnUiThread {recording=false;finishing=true;level=0f;partial=null;captureStatus=err?:"正在完成识别…"}
                 recognition.execute {runOnUiThread {
@@ -649,7 +796,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun updateSegment(id:Long,pos:Int,segment:Segment) {
         val s=current?.takeIf{it.time==id}?:return
-        if(pos !in s.items.indices)return
+        if(pos !in s.items.indices||!canReplaceRevision(s.items[pos],segment.manualRevision))return
         val list=s.items.toMutableList();list[pos]=segment;current=s.copy(items=list);saveCurrent()
     }
     private fun saveCurrent(){current?.takeIf{it.items.isNotEmpty()}?.let{persist(it)}}
@@ -671,7 +818,7 @@ class MainActivity : ComponentActivity() {
         network.execute {
             val result=runCatching{engine.summarize(config,s.items)}
             runOnUiThread {
-                result.onSuccess{v->val updated=s.copy(summary=v);persist(updated);if(current?.time==s.time)current=updated}
+                result.onSuccess{v->sessionFor(s.time)?.takeIf{it.items==s.items}?.let{latest->val updated=latest.copy(summary=v);persist(updated);if(current?.time==s.time)current=updated}}
                     .onFailure{message="总结失败：${it.message}"}
                 summaryBusy=null
             }
@@ -716,7 +863,7 @@ class MainActivity : ComponentActivity() {
             TextButton(onClick={confirm=true},enabled=current?.takeIf{recording||finishing}?.time!=s.time&&summaryBusy!=s.time){Text("删除记录")}
             if(confirm)AlertDialog(onDismissRequest={confirm=false},title={Text("删除此会话？")},confirmButton={TextButton(onClick={sessions=sessions.filterNot{it.time==s.time};archive.saveSessions(sessions);if(current?.time==s.time)current=null;navigate("notes")}){Text("删除")}},dismissButton={TextButton(onClick={confirm=false}){Text("取消")}})
         }
-        Panel{s.items.forEachIndexed{i,item->if(newGroup(s.items,i))GroupTime(item);CaptionPair(item)}}
+        Panel{s.items.forEachIndexed{i,item->if(newGroup(s.items,i))GroupTime(item);CaptionPair(item,s.time,i)}}
     }
     private val defaultCategories=listOf("铁路与交通","工程与技术","计算机与电子","学术与教育","行政与手续","医疗与健康","生活与购物","其他","未分类")
     @Composable private fun TermsPage(){
@@ -854,7 +1001,7 @@ class MainActivity : ComponentActivity() {
                 }
             },enabled=!downloading,shape=corner,modifier=Modifier.fillMaxWidth()){Text(if(downloading)"下载中…" else "下载 / 检查离线翻译模型")}
         }
-        Panel {Text("版本 0.5.2");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
+        Panel {Text("版本 0.6.1");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
     }
     private fun speak(text:String,language:String="") {
         if(text.isBlank())return

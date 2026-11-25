@@ -1,5 +1,16 @@
 # Development log
 
+## 0.6.1
+
+- Show capture timestamps on each caption pair in live and saved sessions.
+
+## 0.6.0
+
+- Optional Russian streaming preview using T-one CTC; final recognition remains Whisper.
+- Tap a word in a completed caption to edit its sentence. Re-translate edited source text and retain manual revisions in session history.
+- Highlight inserted or replaced tokens; reject stale translation results.
+- Thirteen JVM regression tests passed.
+
 ## 0.5.2
 
 - Restore Whisper and VAD parameters from 0.4.1.

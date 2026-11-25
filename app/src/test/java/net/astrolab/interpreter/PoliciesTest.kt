@@ -95,4 +95,16 @@ class PoliciesTest {
         assertFalse(validCloudTranslation("Проверка",""))
         assertTrue(validCloudTranslation("Проверка рельсовой цепи","检查轨道电路"))
     }
+    @Test fun highlightsOnlyChangedWords(){
+        val text="Сегодня мы изучаем сигналы"
+        assertEquals(listOf("сигналы"),changedRanges("Сегодня мы изучаем стрелки",text).map{text.substring(it)})
+        assertEquals(listOf("电"),changedRanges("轨道线路","轨道电路").map{"轨道电路".substring(it)})
+        assertTrue(changedRanges(null,text).isEmpty())
+        assertTrue(changedRanges(text,text).isEmpty())
+    }
+    @Test fun manualRevisionRejectsStaleTranslation(){
+        val edited=Segment("raw",corrected="fixed",manualRevision=1)
+        assertFalse(canReplaceRevision(edited,0))
+        assertTrue(canReplaceRevision(edited,1))
+    }
 }
