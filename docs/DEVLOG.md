@@ -1,5 +1,12 @@
 # Development log
 
+## 0.6.5
+
+- Improve acoustic language boundaries and probe English-dominant segments independently.
+- Experimental CED Tiny sound event captions; classification may be skipped while speech recognition is busy.
+- Emphasize session date and weekday; show full date and time in session details.
+- Eighteen JVM tests passed. Mixed speech and sound event accuracy still require device testing.
+
 ## 0.6.4
 
 - Normalize uppercase English emitted by SenseVoice, retaining common technical acronyms and matching Whisper casing when available.

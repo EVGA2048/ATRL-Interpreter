@@ -124,6 +124,7 @@ class MainActivity : ComponentActivity() {
     private var summaryBusy by mutableStateOf<Long?>(null)
     private val active = AtomicBoolean(false)
     private val asrJobs = AtomicInteger(0)
+    private val soundDetector by lazy { SoundDetector(assets) }
     private val recognition = Executors.newSingleThreadExecutor()
     private val network = Executors.newSingleThreadExecutor()
     private val liveNetwork = Executors.newFixedThreadPool(3)
@@ -443,6 +444,10 @@ class MainActivity : ComponentActivity() {
             Text(java.text.SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(java.util.Date(s.startTime)),
                 fontSize=10.sp,letterSpacing=.25.sp,color=scheme.onSurfaceVariant.copy(alpha=.78f),
                 fontWeight=FontWeight.Medium)
+            if(s.soundEvent.isNotBlank()){
+                Text(soundEventText(s.soundEvent),fontSize=14.sp,fontWeight=FontWeight.Medium,color=scheme.onSurfaceVariant)
+                return@Column
+            }
             if(showRaw)SelectionContainer{Text(s.raw,fontSize=16.sp,lineHeight=24.sp,color=rawColor)}
             else {
                 val displayed=s.corrected.ifBlank{s.raw}
@@ -538,7 +543,7 @@ class MainActivity : ComponentActivity() {
                 LazyColumn(state=list,modifier=Modifier.fillMaxSize(),contentPadding=PaddingValues(18.dp,12.dp)){
                     itemsIndexed(items,key={i,_->i}){i,s->
                         if(newGroup(items,i))GroupTime(s)
-                        if(i==0||newGroup(items,i)||items[i-1].language!=s.language)Text(languageName(s.language.ifBlank{engine.detectText(s.raw)}),fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(top=3.dp))
+                        if(s.soundEvent.isBlank()&&(i==0||newGroup(items,i)||items[i-1].language!=s.language))Text(languageName(s.language.ifBlank{engine.detectText(s.raw)}),fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(top=3.dp))
                         CaptionPair(s,current!!.time,i)
                     }
                     item(key="tail"){
@@ -622,6 +627,24 @@ class MainActivity : ComponentActivity() {
                 var previewSamples=0
                 var lastPreview=0
                 var lastMeter=0L
+                val eventAudio=FloatArray(32000)
+                var eventCount=0
+                var capturedSamples=0L
+                var lastEvent=""
+                var lastEventEnd=0L
+                fun submitEvent(audio:FloatArray,from:Long,until:Long){
+                    // Best effort: speech decoding always has priority.
+                    if(!asrJobs.compareAndSet(0,1))return
+                    recognition.execute{
+                        try{
+                            val label=soundDetector.classify(audio)
+                            if(label!=null&&(label!=lastEvent||from-lastEventEnd>=2500L)){
+                                lastEvent=label;lastEventEnd=until
+                                runOnUiThread{appendSoundEvent(started,label,from,until)}
+                            }else if(label!=null)lastEventEnd=until
+                        }finally{asrJobs.decrementAndGet()}
+                    }
+                }
                 var nativeEpoch=-1
                 var nativeSamples=0
                 val nativeBlocks=ArrayList<FloatArray>()
@@ -699,6 +722,20 @@ class MainActivity : ComponentActivity() {
                     val rms=sqrt(samples.sumOf{(it*it).toDouble()}/n)
                     val meterNow=android.os.SystemClock.elapsedRealtime()
                     if(meterNow-lastMeter>=80L){lastMeter=meterNow;runOnUiThread {level=(rms*5).toFloat().coerceIn(0f,1f);meterHistory=(meterHistory.drop(1)+level)}}
+                    capturedSamples+=n
+                    // Observe all audio, including sound rejected by the speech VAD.
+                    var eventOffset=0
+                    while(eventOffset<n){
+                        val count=minOf(n-eventOffset,eventAudio.size-eventCount)
+                        samples.copyInto(eventAudio,eventCount,eventOffset,eventOffset+count)
+                        eventCount+=count;eventOffset+=count
+                        if(eventCount==eventAudio.size){
+                            val end=origin+(capturedSamples-n+eventOffset)*1000/16000
+                            val rmsEvent=sqrt(eventAudio.sumOf{(it*it).toDouble()}/eventAudio.size)
+                            if(rmsEvent>.008)submitEvent(eventAudio.copyOf(),end-2000,end)
+                            eventCount=0
+                        }
+                    }
                     detector.acceptWaveform(samples)
                     if(drain()){
                         previewBlocks.clear();previewSamples=0;lastPreview=0;preroll.clear()
@@ -753,6 +790,16 @@ class MainActivity : ComponentActivity() {
         }.start()
     }
     private fun stopCapture() { if(active.getAndSet(false)){finishing=true;captureStatus="正在结束…"} }
+    private fun appendSoundEvent(id:Long,label:String,from:Long,until:Long){
+        val session=current?.takeIf{it.time==id}?:return
+        val pos=session.items.size
+        val event=Segment(soundEventText(label),language="",time=until,startTime=from,soundEvent=label)
+        current=session.copy(items=session.items+event);saveCurrent()
+        for(index in playbackOrder.mark(pos)){
+            val ready=current?.items?.getOrNull(index)
+            if(autoSpeak&&ready!=null&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
+        }
+    }
     private fun enqueue(raw:String,language:String,id:Long,config:ApiConfig,online:Boolean,from:Long,until:Long) {
         val s=current?.takeIf{it.time==id}?:return
         val pos=s.items.size
@@ -857,7 +904,10 @@ class MainActivity : ComponentActivity() {
         }
         val dateFormat=java.text.SimpleDateFormat("yyyy年 M月 d日",Locale.CHINA)
         sessions.groupBy{dateFormat.format(java.util.Date(it.time))}.forEach{(day,entries)->
-            Text(day,fontSize=13.sp,color=scheme.onSurfaceVariant,modifier=Modifier.padding(start=6.dp,top=5.dp))
+            Row(Modifier.fillMaxWidth().padding(start=6.dp,top=12.dp,bottom=2.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                Text(day,fontSize=18.sp,fontWeight=FontWeight.SemiBold,color=scheme.onSurface)
+                Text(java.text.SimpleDateFormat("EEEE",Locale.CHINA).format(java.util.Date(entries.first().time)),fontSize=12.sp,color=scheme.onSurfaceVariant)
+            }
             Surface(shape=RoundedCornerShape(16.dp),color=scheme.surface){
                 Column(Modifier.fillMaxWidth()){
                     entries.forEachIndexed{i,session->
@@ -910,8 +960,8 @@ class MainActivity : ComponentActivity() {
                 .semantics{if(enabled)customActions=listOf(CustomAccessibilityAction(if(confirm)"确认删除记录" else "删除记录"){onDelete();true})}
                 .clickable(onClick=onTap).padding(horizontal=16.dp,vertical=15.dp),verticalAlignment=Alignment.CenterVertically){
                 Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(5.dp)){
-                    Text(timeLabel(session.time),fontSize=17.sp,fontWeight=FontWeight.Medium)
-                    Text(session.summary.ifBlank{session.items.firstOrNull()?.translated?.ifBlank{session.items.first().raw}.orEmpty()}.ifBlank{"${session.items.size} 段语音"},fontSize=14.sp,color=scheme.onSurfaceVariant,maxLines=2,overflow=TextOverflow.Ellipsis)
+                    Text(timeLabel(session.time),fontSize=12.sp,color=scheme.onSurfaceVariant)
+                    Text(session.summary.ifBlank{session.items.firstOrNull()?.translated?.ifBlank{session.items.first().raw}.orEmpty()}.ifBlank{"${session.items.size} 段语音"},fontSize=15.sp,color=scheme.onSurface,fontWeight=FontWeight.Medium,maxLines=2,overflow=TextOverflow.Ellipsis)
                 }
                 Text("›",fontSize=24.sp,color=scheme.onSurfaceVariant,modifier=Modifier.padding(start=12.dp))
             }
@@ -920,7 +970,7 @@ class MainActivity : ComponentActivity() {
     @Composable private fun DetailPage() {
         val s=sessions.firstOrNull{it.time==viewed}
         if(s==null){Text("记录不存在");return}
-        Text(s.title,fontSize=22.sp,fontWeight=FontWeight.SemiBold)
+        Text(java.text.SimpleDateFormat("yyyy年 M月 d日 HH:mm",Locale.CHINA).format(java.util.Date(s.time)),fontSize=20.sp,fontWeight=FontWeight.SemiBold)
         Panel {
             Text(if(s.summary.isBlank())"尚未生成总结" else s.summary)
             Button(onClick={summarize(s)},enabled=summaryBusy==null&&current?.takeIf{recording||finishing}?.time!=s.time,shape=corner){Text(if(summaryBusy==s.time)"总结中…" else "生成总结")}
@@ -1066,7 +1116,7 @@ class MainActivity : ComponentActivity() {
                 }
             },enabled=!downloading,shape=corner,modifier=Modifier.fillMaxWidth()){Text(if(downloading)"下载中…" else "下载 / 检查离线翻译模型")}
         }
-        Panel {Text("版本 0.6.4");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
+        Panel {Text("版本 0.6.5");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
     }
     private fun speak(text:String,language:String="") {
         if(text.isBlank())return

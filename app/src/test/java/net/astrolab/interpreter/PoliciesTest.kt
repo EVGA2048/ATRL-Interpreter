@@ -136,4 +136,12 @@ class PoliciesTest {
         assertEquals("中文 OpenAI test",normalizeSenseVoiceCase("中文 OPENAI TEST","OpenAI test"))
         assertEquals("中文 English test",normalizeSenseVoiceCase("中文 English test",""))
     }
+    @Test fun detectsSoundLabelsWithoutMistakingNoiseForMusic(){
+        assertEquals("咳嗽",soundLabel(listOf(SoundScore("Cough",.62f))))
+        assertEquals("音乐",soundLabel(listOf(SoundScore("Music",.72f))))
+        assertEquals("笑声",soundLabel(listOf(SoundScore("Snicker",.78f))))
+        assertNull(soundLabel(listOf(SoundScore("Siren",.8f),SoundScore("Music",.4f))))
+        assertNull(soundLabel(listOf(SoundScore("Speech",.9f),SoundScore("Cough",.05f))))
+        assertEquals("[咳嗽]",soundEventText("咳嗽"))
+    }
 }

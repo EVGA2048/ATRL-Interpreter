@@ -12,7 +12,7 @@ import javax.net.ssl.HttpsURLConnection
 import java.util.concurrent.TimeUnit
 
 data class Term(val ru: String, val zh: String, val count: Int = 1, val approved: Boolean = false, val category: String = "未分类", val example: String = "", val language: String = "ru")
-data class Segment(val raw: String, val corrected: String = raw, val translated: String = "", val scene: String = "", val time: Long = System.currentTimeMillis(), val error: String = "", val language: String = "", val target: String = "", val startTime: Long = time, val manualRevision:Int=0, val sourceBeforeEdit:String?=null, val translationBeforeEdit:String?=null)
+data class Segment(val raw: String, val corrected: String = raw, val translated: String = "", val scene: String = "", val time: Long = System.currentTimeMillis(), val error: String = "", val language: String = "", val target: String = "", val startTime: Long = time, val manualRevision:Int=0, val sourceBeforeEdit:String?=null, val translationBeforeEdit:String?=null, val soundEvent:String="")
 data class Session(val title: String, val items: List<Segment>, val summary: String = "", val time: Long = System.currentTimeMillis())
 data class Recognition(val text: String, val language: String)
 data class Analysis(val corrected: String, val translated: String, val scene: String, val terms: List<Term>)
@@ -68,8 +68,8 @@ class Engine(private val context: Context) {
     private fun mixedAcoustic(r:OfflineRecognizer,samples:FloatArray):Recognition?{
         if(samples.size<22400||samples.size>16000*8)return null
         val probes=ArrayList<LanguageProbe>()
-        for(center in 4800 until samples.size step 4000){
-            val window=samples.copyOfRange(maxOf(0,center-4800),minOf(samples.size,center+4800))
+        for(center in 4800 until samples.size step 3200){
+            val window=samples.copyOfRange(maxOf(0,center-6400),minOf(samples.size,center+6400))
             if(window.size<4000)continue
             val p=decodeLanguage(r,window,cap=2)
             probes.add(LanguageProbe(center,p.language))
@@ -78,7 +78,9 @@ class Engine(private val context: Context) {
         if(spans.isEmpty())return null
         val parts=spans.map{span->
             val audio=samples.copyOfRange(span.start,span.end)
-            val p=decodeLanguage(r,audio,span.language,8)
+            val forced=decodeLanguage(r,audio,span.language,8)
+            val p=if(plausibleCaption(forced.text,audio.size)&&span.language in scriptLanguages(forced.text))forced
+                else decodeLanguage(r,audio,cap=8)
             if(!plausibleCaption(p.text,audio.size)||span.language !in scriptLanguages(p.text))return null
             p
         }
@@ -118,10 +120,10 @@ class Engine(private val context: Context) {
                 if(plausibleCaption(recovered.text,samples.size))chosen=recovered.copy(language=asrLanguage(recovered))
             }finally{retry.release()}
         }
-        if(final&&(mixed||scriptLanguages(chosen.text).size>=2)){
+        if(final&&(mixed||first.language=="en"||scriptLanguages(chosen.text).size>=2)){
             val separated=runCatching{mixedAcoustic(r,samples)}.getOrNull()
-            if(separated!=null&&scriptLanguages(separated.text).containsAll(scriptLanguages(chosen.text))&&
-                (mixed||scriptLanguages(separated.text).size>scriptLanguages(chosen.text).size))chosen=separated
+            if(separated!=null&&scriptLanguages(separated.text).size>=2&&
+                (mixed||first.language=="en"||scriptLanguages(separated.text).size>scriptLanguages(chosen.text).size))chosen=separated
         }
         android.util.Log.d("InterpreterASR","audio_ms=${samples.size/16} decode_ms=${android.os.SystemClock.elapsedRealtime()-started} lang=${chosen.language} final=$final loop=${hasDecodeLoop(chosen.text)}")
         return chosen

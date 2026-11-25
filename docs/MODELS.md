@@ -15,3 +15,7 @@ Run `scripts/fetch-models.sh` to download and verify the artifacts.
 | `silero_vad.onnx` | `9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6` |
 | `tone-ru.onnx` | `5ded080e2a6c86ecc11bcb0902d77524eb3e8b0844cb0c0754347f5aafb4dabc` |
 | `tone-ru-tokens.txt` | `27f7b3ba2096c572375fba1a6b29af1f80d86e08a329940612908112695f97e0` |
+| `ced-tiny.int8.onnx` | `73aa22e783115f6a4ae169b36089907e07d0fd44795595eddea9c1bfc74cc945` |
+| `ced-labels.csv` | `cdd1049833c4b86127c2773ac0d14a2754b6a6d0d1798002ed5c66e699708429` |
+
+CED Tiny INT8: experimental audio tagging, exported by sherpa-onnx from [CED](https://github.com/RicherMans/CED). Review upstream code and weight redistribution terms before publishing a bundled APK.

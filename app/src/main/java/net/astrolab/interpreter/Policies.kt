@@ -186,39 +186,57 @@ internal fun canReplaceRevision(existing:Segment,expected:Int)=existing.manualRe
 
 internal data class LanguageProbe(val center:Int,val language:String)
 internal data class LanguageSpan(val start:Int,val end:Int,val language:String)
-/** Two consecutive local acoustic language decisions establish a change. */
+/** Ignore isolated language predictions; locate a switch between stable acoustic runs. */
 internal fun languageSpans(samples:FloatArray,probes:List<LanguageProbe>):List<LanguageSpan>{
     val valid=probes.filter{it.language in setOf("zh","en","ru")}
     if(valid.size<2)return emptyList()
-    val changes=mutableListOf<LanguageProbe>()
-    var active=""
-    for(i in 0 until valid.lastIndex){
-        val p=valid[i]
-        if(p.language!=valid[i+1].language||p.language==active)continue
-        changes.add(p);active=p.language
+    data class Run(val first:Int,val last:Int,val language:String)
+    val runs=mutableListOf<Run>()
+    var i=0
+    while(i<valid.size){
+        var j=i+1
+        while(j<valid.size&&valid[j].language==valid[i].language)j++
+        if(j-i>=2){
+            val next=Run(valid[i].center,valid[j-1].center,valid[i].language)
+            if(runs.lastOrNull()?.language==next.language)runs[runs.lastIndex]=runs.last().copy(last=next.last)
+            else runs.add(next)
+        }
+        i=j
     }
-    if(changes.size<2)return emptyList()
+    if(runs.size !in 2..6)return emptyList()
     val result=mutableListOf<LanguageSpan>()
     var start=0
-    for(i in 1 until changes.size){
-        val c=changes[i].center
-        // Pick an early low-energy boundary rather than splitting a word in half.
-        val lo=maxOf(start+5600,c-6400)
-        val hi=minOf(samples.size-5600,c+800)
+    for(k in 1 until runs.size){
+        val center=(runs[k-1].last+runs[k].first)/2
+        val lo=maxOf(start+4800,center-4800)
+        val hi=minOf(samples.size-4800,center+4800)
         if(lo>hi)return emptyList()
-        val frames=(lo..hi step 320).map{at->
+        val cut=(lo..hi step 160).minByOrNull{at->
             var power=0.0
             val left=maxOf(0,at-160);val right=minOf(samples.size,at+160)
             for(j in left until right)power+=samples[j]*samples[j]
-            at to kotlin.math.sqrt(power/maxOf(1,right-left))
-        }
-        val threshold=(frames.maxOf{it.second}*.12).coerceAtLeast(.006)
-        val cut=frames.firstOrNull{it.second<=threshold}?.first?:frames.minByOrNull{it.second}!!.first
-        result.add(LanguageSpan(start,cut,changes[i-1].language));start=cut
+            kotlin.math.ln1p(100*kotlin.math.sqrt(power/maxOf(1,right-left)))+
+                kotlin.math.abs(at-center)/4800.0*1.6
+        }?:return emptyList()
+        result.add(LanguageSpan(start,cut,runs[k-1].language));start=cut
     }
-    result.add(LanguageSpan(start,samples.size,changes.last().language))
-    return result.takeIf{it.size in 2..6&&it.zipWithNext().all{(a,b)->a.end==b.start}}?:emptyList()
+    result.add(LanguageSpan(start,samples.size,runs.last().language))
+    return result
 }
+internal data class SoundScore(val name:String,val probability:Float)
+internal fun soundLabel(scores:List<SoundScore>):String?{
+    // Select only supported events with meaningful evidence; do not label general noise.
+    val top=scores.firstOrNull()?:return null
+    fun score(vararg names:String)=scores.filter{it.name in names}.maxOfOrNull{it.probability}?:0f
+    if(score("Cough","Throat clearing")>=.25f)return "咳嗽"
+    if(score("Sneeze")>=.20f&&top.name=="Sneeze")return "打喷嚏"
+    if(score("Laughter","Snicker","Chuckle, chortle","Giggle","Baby laughter")>=.28f)return "笑声"
+    if(score("Applause","Clapping")>=.35f)return "掌声"
+    if(score("Music","Vocal music","Musical instrument","Singing","A capella")>=.40f&&
+        (top.name in setOf("Music","Vocal music","Musical instrument","Singing","A capella","Choir")||top.name.endsWith(" music")))return "音乐"
+    return null
+}
+internal fun soundEventText(label:String)="[$label]"
 internal fun preserveSource(raw:String)=raw
 internal fun joinAcousticParts(parts:List<Recognition>):Recognition{
     val text=parts.joinToString(" "){it.text.trim().trimEnd('。','.','！','!','？','?')}

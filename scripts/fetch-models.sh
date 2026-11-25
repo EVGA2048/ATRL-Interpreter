@@ -20,4 +20,9 @@ curl -fL "$base/asr-models/$tone.tar.bz2" -o "$tmp/tone.tar.bz2"
 tar -xjf "$tmp/tone.tar.bz2" -C "$tmp" "$tone/model.onnx" "$tone/tokens.txt"
 cp "$tmp/$tone/model.onnx" app/src/main/assets/asr/tone-ru.onnx
 cp "$tmp/$tone/tokens.txt" app/src/main/assets/asr/tone-ru-tokens.txt
+ced=sherpa-onnx-ced-tiny-audio-tagging-2024-04-19
+curl -fL "$base/audio-tagging-models/$ced.tar.bz2" -o "$tmp/ced.tar.bz2"
+tar -xjf "$tmp/ced.tar.bz2" -C "$tmp" "$ced/model.int8.onnx" "$ced/class_labels_indices.csv"
+cp "$tmp/$ced/model.int8.onnx" app/src/main/assets/asr/ced-tiny.int8.onnx
+cp "$tmp/$ced/class_labels_indices.csv" app/src/main/assets/asr/ced-labels.csv
 shasum -a 256 -c scripts/models.sha256
