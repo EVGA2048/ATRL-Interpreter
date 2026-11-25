@@ -1,5 +1,11 @@
 # Development log
 
+## 0.6.2
+
+- Add acoustic language probing and segmented transcription for Chinese, English and Russian code-switching.
+- Keep recognized source text unchanged by cloud translation.
+- Fifteen JVM regression tests passed.
+
 ## 0.6.1
 
 - Show capture timestamps on each caption pair in live and saved sessions.

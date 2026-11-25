@@ -169,3 +169,44 @@ internal fun changedRanges(before:String?,after:String):List<IntRange>{
     return b.indices.filter{!keep[it]}.map{b[it].range}
 }
 internal fun canReplaceRevision(existing:Segment,expected:Int)=existing.manualRevision==expected
+
+internal data class LanguageProbe(val center:Int,val language:String)
+internal data class LanguageSpan(val start:Int,val end:Int,val language:String)
+/** Two consecutive local acoustic language decisions establish a change. */
+internal fun languageSpans(samples:FloatArray,probes:List<LanguageProbe>):List<LanguageSpan>{
+    val valid=probes.filter{it.language in setOf("zh","en","ru")}
+    if(valid.size<2)return emptyList()
+    val changes=mutableListOf<LanguageProbe>()
+    var active=""
+    for(i in 0 until valid.lastIndex){
+        val p=valid[i]
+        if(p.language!=valid[i+1].language||p.language==active)continue
+        changes.add(p);active=p.language
+    }
+    if(changes.size<2)return emptyList()
+    val result=mutableListOf<LanguageSpan>()
+    var start=0
+    for(i in 1 until changes.size){
+        val c=changes[i].center
+        // Pick an early low-energy boundary rather than splitting a word in half.
+        val lo=maxOf(start+5600,c-6400)
+        val hi=minOf(samples.size-5600,c+800)
+        if(lo>hi)return emptyList()
+        val frames=(lo..hi step 320).map{at->
+            var power=0.0
+            val left=maxOf(0,at-160);val right=minOf(samples.size,at+160)
+            for(j in left until right)power+=samples[j]*samples[j]
+            at to kotlin.math.sqrt(power/maxOf(1,right-left))
+        }
+        val threshold=(frames.maxOf{it.second}*.12).coerceAtLeast(.006)
+        val cut=frames.firstOrNull{it.second<=threshold}?.first?:frames.minByOrNull{it.second}!!.first
+        result.add(LanguageSpan(start,cut,changes[i-1].language));start=cut
+    }
+    result.add(LanguageSpan(start,samples.size,changes.last().language))
+    return result.takeIf{it.size in 2..6&&it.zipWithNext().all{(a,b)->a.end==b.start}}?:emptyList()
+}
+internal fun preserveSource(raw:String)=raw
+internal fun joinAcousticParts(parts:List<Recognition>):Recognition{
+    val text=parts.joinToString(" "){it.text.trim().trimEnd('。','.','！','!','？','?')}
+    return Recognition(text,scriptLanguages(text).sorted().joinToString("+"))
+}

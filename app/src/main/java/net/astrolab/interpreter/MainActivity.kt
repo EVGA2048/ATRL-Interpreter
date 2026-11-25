@@ -99,6 +99,7 @@ class MainActivity : ComponentActivity() {
     private var pending by mutableIntStateOf(0)
     private var partial by mutableStateOf<Recognition?>(null)
     private var russianStreaming by mutableStateOf(false)
+    private var mixedRecognition by mutableStateOf(false)
     private val streamingWorker=Executors.newSingleThreadExecutor()
     private val editWorker=Executors.newFixedThreadPool(2)
     private data class SentenceEdit(val session:Long,val index:Int,val source:Boolean,val before:String,val selection:TextRange)
@@ -511,11 +512,12 @@ class MainActivity : ComponentActivity() {
                 var sourceMenu by remember{mutableStateOf(false)}
                 Box{
                     TextButton(onClick={sourceMenu=true},enabled=!recording&&!finishing,contentPadding=PaddingValues(horizontal=4.dp)){
-                        Text(if(russianStreaming)"俄语实时 ▾" else "自动识别 ▾",fontSize=13.sp)
+                        Text(if(mixedRecognition)"中英俄混合 ▾" else if(russianStreaming)"俄语实时 ▾" else "自动识别 ▾",fontSize=13.sp)
                     }
                     DropdownMenu(expanded=sourceMenu,onDismissRequest={sourceMenu=false}){
-                        DropdownMenuItem(text={Text("自动识别")},onClick={russianStreaming=false;sourceMenu=false})
-                        DropdownMenuItem(text={Text("俄语实时")},onClick={russianStreaming=true;sourceMenu=false})
+                        DropdownMenuItem(text={Text("自动识别")},onClick={russianStreaming=false;mixedRecognition=false;sourceMenu=false})
+                        DropdownMenuItem(text={Text("俄语实时")},onClick={russianStreaming=true;mixedRecognition=false;sourceMenu=false})
+                        DropdownMenuItem(text={Text("中英俄混合")},onClick={russianStreaming=false;mixedRecognition=true;sourceMenu=false})
                     }
                 }
                 Text(captureStatus,fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.weight(1f).padding(start=6.dp))
@@ -586,6 +588,7 @@ class MainActivity : ComponentActivity() {
         catch(e:Exception) { active.set(false); CaptureService.stopRequested=null; captureStatus="无法启动录音服务：${e.message}"; return }
         recording=true; captureStatus="正在聆听"; pending=0;partial=null;partialGeneration=-1;captureWarning="";meterHistory=List(30){0f};finalizer=null;playbackOrder.clear()
         val useNative=russianStreaming
+        val useMixed=mixedRecognition
         val nativeFailed=AtomicBoolean(false)
         val nativeJobs=AtomicInteger(0)
         val native=if(useNative)StreamingRussian(assets) else null
@@ -654,7 +657,7 @@ class MainActivity : ComponentActivity() {
                             asrJobs.incrementAndGet()
                             recognition.execute {
                                 try {
-                                    val result=engine.transcribe(samples,final=true)
+                                    val result=engine.transcribe(samples,final=true,mixed=useMixed)
                                     runOnUiThread {
                                         if(current?.time==started&&partialGeneration<=epoch)partial=null
                                         if(result.text.isNotBlank()){
@@ -763,7 +766,7 @@ class MainActivity : ComponentActivity() {
             val snapshot=currentContextForWorker(id,pos)
             val analysis=if(online&&config.key.isNotBlank())runCatching{engine.analyze(config,raw,snapshot.first,snapshot.second,target,true,lang)} else null
             val a=analysis?.getOrNull()
-            val final=if(a!=null)base.copy(corrected=if(correctionKeepsScripts(raw,a.corrected)&&!hasDecodeLoop(a.corrected))a.corrected else raw,translated=a.translated,scene=a.scene)
+            val final=if(a!=null)base.copy(corrected=raw,translated=a.translated,scene=a.scene)
             else {
                 val translated=runCatching{local.get(15,java.util.concurrent.TimeUnit.SECONDS)}.getOrNull().orEmpty()
                 base.copy(translated=translated,error=when{
@@ -1001,7 +1004,7 @@ class MainActivity : ComponentActivity() {
                 }
             },enabled=!downloading,shape=corner,modifier=Modifier.fillMaxWidth()){Text(if(downloading)"下载中…" else "下载 / 检查离线翻译模型")}
         }
-        Panel {Text("版本 0.6.1");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
+        Panel {Text("版本 0.6.2");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
     }
     private fun speak(text:String,language:String="") {
         if(text.isBlank())return

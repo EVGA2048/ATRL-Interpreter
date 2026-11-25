@@ -107,4 +107,21 @@ class PoliciesTest {
         assertFalse(canReplaceRevision(edited,0))
         assertTrue(canReplaceRevision(edited,1))
     }
+    @Test fun sourceIsNotTranslatedOrCorrected(){
+        val original="我想要test English speaking и по русский язык"
+        assertEquals(original,preserveSource(original))
+        val r=joinAcousticParts(listOf(Recognition("我想要","zh"),Recognition("test English speaking","en"),Recognition("и по русский язык","ru")))
+        assertEquals("我想要 test English speaking и по русский язык",r.text)
+        assertEquals("en+ru+zh",r.language)
+    }
+    @Test fun requiresTwoLanguageProbesBeforeSwitching(){
+        val audio=FloatArray(48000){.1f}
+        for(i in 11000..11700)audio[i]=0f
+        for(i in 30900..31500)audio[i]=0f
+        val spans=languageSpans(audio,listOf(LanguageProbe(4800,"zh"),LanguageProbe(8800,"zh"),LanguageProbe(12800,"en"),LanguageProbe(16800,"en"),LanguageProbe(20800,"ru"),LanguageProbe(24800,"en"),LanguageProbe(32800,"ru"),LanguageProbe(36800,"ru")))
+        assertEquals(listOf("zh","en","ru"),spans.map{it.language})
+        assertEquals(0,spans.first().start)
+        assertEquals(audio.size,spans.last().end)
+        assertTrue(languageSpans(audio,listOf(LanguageProbe(4800,"zh"),LanguageProbe(8800,"zh"),LanguageProbe(12800,"en"),LanguageProbe(16800,"zh"),LanguageProbe(20800,"zh"))).isEmpty())
+    }
 }
