@@ -1,5 +1,10 @@
 # Development log
 
+## 0.6.4
+
+- Normalize uppercase English emitted by SenseVoice, retaining common technical acronyms and matching Whisper casing when available.
+- Mixed-language recognition remains experimental.
+
 ## 0.6.3
 
 - Swipe left on a session to reveal Delete; tap again to confirm. Swiping never deletes directly.

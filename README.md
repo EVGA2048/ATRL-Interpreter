@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.6.3-2859CC?style=flat-square" alt="Version 0.6.3">
+  <img src="https://img.shields.io/badge/version-0.6.4-2859CC?style=flat-square" alt="Version 0.6.4">
   <img src="https://img.shields.io/badge/Android-8.0%2B-536275?style=flat-square" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/ABI-ARM64-82996a?style=flat-square" alt="ARM64">
   <img src="https://img.shields.io/badge/status-development-74747B?style=flat-square" alt="In development">
@@ -17,7 +17,7 @@
 
 **Interpreter** 是 ASTROLAB 的 Android 实时传译工具，支持中文、英语与俄语的语音识别、文字互译、双语字幕、会话总结与专业词库。
 
-语音识别在本地运行，DeepSeek Flash 结合上下文和词库辅助翻译与纠错。翻译和传译页右上角可切换本地与联网模式。
+语音识别在本地运行，DeepSeek Flash 结合上下文和词库辅助翻译。翻译和传译页右上角可切换本地与联网模式。
 
 <a id="features"></a>
 
@@ -27,12 +27,12 @@
 |:--|:--|
 | TRANSLATE | 自动判定文字语种，选择目标语言，复制与朗读 |
 | INTERPRET | 连续双语字幕，灰色临时识别文字，译文就地更新 |
-| CONTEXT | 场景推测、基于前后文的识别纠错、术语匹配 |
+| CONTEXT | 场景推测、上下文翻译、术语匹配 |
 | SESSIONS | 本地会话记录、云端总结、原始识别文本 |
 | GLOSSARY | 自动提取术语候选，分组、搜索、筛选、例句及确认 |
 | AUDIO | 前台麦克风服务、系统 TTS、通知栏结束会话 |
 
-字幕按语句对应排列，停顿超过 60 秒后另起一组。Whisper 采用分段识别与滚动预识别，中英混说由 SenseVoice 辅助识别。俄语实时模式使用 T-one 流式预识别，句末由 Whisper 校正。点按已识别字幕可编辑原文或译文，修改原文后自动重译该句。
+字幕按语句对应排列，每段显示采集时间戳，停顿超过 60 秒后另起一组。Whisper 采用分段识别与滚动预识别，中英混说由 SenseVoice 辅助识别。俄语实时模式使用 T-one 流式预识别，句末由 Whisper 校正。点按已识别字幕可编辑原文或译文，修改原文后自动重译该句。
 
 自动模式下，中文译为俄语，俄语与英语译为简体中文。文字翻译也可以指定中文、英语或俄语为目标语言。
 
@@ -59,7 +59,7 @@
                 +-----------+-----------+
                 |                       |
             ML Kit                DeepSeek Flash
-          local translate        context / correction
+          local translate        context / translation
                 |                       |
                 +-----------+-----------+
                             |
@@ -78,7 +78,7 @@
 | Storage | Android app-private storage |
 | Credentials | Android Keystore / AES-GCM |
 
-ASR 模型随 APK 安装。本地模式使用 ML Kit 翻译及离线 TTS，需提前下载语言包；联网模式使用 Flash 增强翻译、纠错、总结及术语提取。
+ASR 模型随 APK 安装。本地模式使用 ML Kit 翻译及离线 TTS，需提前下载语言包；联网模式使用 Flash 增强翻译、总结及术语提取。
 
 <a id="build"></a>
 
@@ -103,10 +103,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## 04 / Development
 
-当前版本 **0.6.3**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
+当前版本 **0.6.4**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
 
 | 版本 | 主要变化 |
 |:--|:--|
+| 0.6.4 | SenseVoice 英文大小写处理 |
 | 0.6.3 | 记录左滑删除与二次确认 |
 | 0.6.2 | 中英俄混合识别、原文与翻译分离 |
 | 0.6.1 | 逐句时间戳 |
@@ -120,7 +121,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 | 0.2.0 | 本地 ASR、语义增强、记录、总结、术语与 TTS |
 | 0.1.0 | Android 工程与真机录音原型 |
 
-0.6.1 增加逐句采集时间戳。
+中英俄连续混说仍处于实验阶段，可能出现漏词、误判语种或词汇被识别模型翻译的现象。可点按字幕手动修正。
 
 详细记录：[DEVLOG](docs/DEVLOG.md) / [App Icon Standard](docs/ASTROLAB-APP-ICON-STANDARD.md)。
 

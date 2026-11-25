@@ -41,7 +41,7 @@ class PoliciesTest {
         now=17000;gate.check(a)
     }
     @Test fun bilingualSelectionPreservesScriptsAndRussian() {
-        assertEquals(Recognition("中文测试 ENGLISH TEST","en+zh"),
+        assertEquals(Recognition("中文测试 English test","en+zh"),
             selectBilingual(Recognition("中文测试 英语文本","zh"),"中文测试ENGLISH TEST"))
         val russian=Recognition("Сегодня мы изучаем сигналы.","ru")
         assertEquals(russian,selectBilingual(russian,"中文 English"))
@@ -129,5 +129,11 @@ class PoliciesTest {
         assertTrue(shouldRevealDelete(-60f,100f,0f))
         assertTrue(shouldRevealDelete(-10f,100f,-800f))
         assertFalse(shouldRevealDelete(-90f,100f,800f))
+    }
+    @Test fun senseVoiceNormalizesUppercaseWithoutTranslating(){
+        assertEquals("我想要 test English speaking",normalizeSenseVoiceCase("我想要 TEST ENGLISH SPEAKING","我想要测试英语"))
+        assertEquals("配置 ETCS 和 USB",normalizeSenseVoiceCase("配置 ETCS 和 USB","配置"))
+        assertEquals("中文 OpenAI test",normalizeSenseVoiceCase("中文 OPENAI TEST","OpenAI test"))
+        assertEquals("中文 English test",normalizeSenseVoiceCase("中文 English test",""))
     }
 }

@@ -40,6 +40,20 @@ internal fun mixedCode(text: String, fallback: String): String {
     val scripts = scriptLanguages(text)
     return if(scripts.size > 1) scripts.sorted().joinToString("+") else fallback
 }
+// SenseVoice emits uppercase English by design. Normalize casing only, not words.
+private val latinWords=Regex("[A-Za-z]+(?:'[A-Za-z]+)?")
+private val technicalAcronyms=setOf("AI","API","ASR","ADB","APK","CPU","GPU","RAM","ROM","USB","RTC","GPS","ETCS","ATP","ATO","CBTC","VAD","TTS","NLP","HTTP","HTTPS","IP","TCP","UDP","USB","OS","UI","MR","AR","VR","LED","LCD","OLED","VFD","PLC","CAD","ISO","PDF","PC","SDK","ONNX","CTC","DSP")
+internal fun normalizeSenseVoiceCase(text:String,reference:String):String{
+    val tokens=latinWords.findAll(text).map{it.value}.toList()
+    if(tokens.none{it.length>=2}||tokens.any{it.any(Char::isLowerCase)})return text
+    val preferred=latinWords.findAll(reference).map{it.value}.filter{it.any(Char::isLowerCase)}
+        .associateBy{it.lowercase(java.util.Locale.ROOT)}
+    val names=mapOf("ENGLISH" to "English","RUSSIAN" to "Russian","CHINESE" to "Chinese","I" to "I")
+    return latinWords.replace(text){m->
+        val word=m.value
+        preferred[word.lowercase(java.util.Locale.ROOT)]?:names[word]?:if(word in technicalAcronyms)word else word.lowercase(java.util.Locale.ROOT)
+    }
+}
 internal fun selectBilingual(whisper: Recognition, candidate: String): Recognition {
     if (whisper.language !in setOf("zh","en") || "ru" in scriptLanguages(whisper.text)) return whisper
     val scripts=scriptLanguages(candidate)
@@ -47,7 +61,7 @@ internal fun selectBilingual(whisper: Recognition, candidate: String): Recogniti
     // from a Chinese translation, and never replace a Russian transcription.
     if (scripts != setOf("zh","en")) return whisper
     val normalized=candidate.replace(Regex("(?<=[\\p{IsHan}])(?=[A-Za-z])|(?<=[A-Za-z])(?=[\\p{IsHan}])")," ")
-    return Recognition(normalized,"en+zh")
+    return Recognition(normalizeSenseVoiceCase(normalized,whisper.text),"en+zh")
 }
 internal fun correctionKeepsScripts(raw: String, corrected: String): Boolean {
     val original=scriptLanguages(raw)
