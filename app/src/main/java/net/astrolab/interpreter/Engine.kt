@@ -86,29 +86,32 @@ class Engine(private val context: Context) {
         }
         return joinAcousticParts(parts).takeIf{scriptLanguages(it.text).size>=2&&plausibleCaption(it.text,samples.size)}
     }
-    @Synchronized fun transcribe(samples:FloatArray, final:Boolean=false, mixed:Boolean=false): Recognition {
+    @Synchronized fun transcribe(samples:FloatArray, final:Boolean=false, mixed:Boolean=false, chinese:Boolean=false): Recognition {
         val r=prepareAsr()
         val stream=r.createStream()
         val started=android.os.SystemClock.elapsedRealtime()
         val first=try {
-            stream.setOption("language_candidates","zh,en,ru")
+            if(chinese)stream.setOption("language","zh")
+            else stream.setOption("language_candidates","zh,en,ru")
             stream.acceptWaveform(samples,16000);r.decode(stream)
             val result=r.getResult(stream)
             Recognition(result.text.trim(),result.lang.trim().removePrefix("<|").removeSuffix("|>").lowercase())
         }finally{stream.release()}
         var chosen=first.copy(language=asrLanguage(first))
-        if(first.language in setOf("zh","en") && samples.size>=12000 && "ru" !in scriptLanguages(first.text)){
+        if((chinese||first.language in setOf("zh","en")) && samples.size>=8000 && "ru" !in scriptLanguages(first.text)){
             val secondary=bilingualRecognizer()
             if(secondary!=null){
                 val st=secondary.createStream()
                 try {
                     st.acceptWaveform(samples,16000);secondary.decode(st)
-                    val result=selectBilingual(first,secondary.getResult(st).text.trim())
+                    val heard=secondary.getResult(st).text.trim()
+                    val result=if(chinese||first.language=="zh")chooseChineseCaption(first,heard,samples.size,chinese)
+                        else selectBilingual(first,heard)
                     if(result!=first&&plausibleCaption(result.text,samples.size))chosen=result
                 }catch(_:Exception){}finally{st.release()}
             }
         }
-        if(final&&chosen.text.isNotBlank()&&!plausibleCaption(chosen.text,samples.size)){
+        if(final&&!plausibleCaption(chosen.text,samples.size)){
             val retry=r.createStream()
             try{
                 if(first.language in setOf("zh","en","ru"))retry.setOption("language",first.language)
@@ -120,13 +123,13 @@ class Engine(private val context: Context) {
                 if(plausibleCaption(recovered.text,samples.size))chosen=recovered.copy(language=asrLanguage(recovered))
             }finally{retry.release()}
         }
-        if(final&&(mixed||first.language=="en"||scriptLanguages(chosen.text).size>=2)){
+        if(final&&mixed&&!chinese){
             val separated=runCatching{mixedAcoustic(r,samples)}.getOrNull()
             if(separated!=null&&scriptLanguages(separated.text).size>=2&&
                 (mixed||first.language=="en"||scriptLanguages(separated.text).size>scriptLanguages(chosen.text).size))chosen=separated
         }
         android.util.Log.d("InterpreterASR","audio_ms=${samples.size/16} decode_ms=${android.os.SystemClock.elapsedRealtime()-started} lang=${chosen.language} final=$final loop=${hasDecodeLoop(chosen.text)}")
-        return chosen
+        return if(plausibleCaption(chosen.text,samples.size))chosen else Recognition("",chosen.language)
     }
     private val translators = mutableMapOf<Pair<String,String>, Translator>()
     private fun translator(source:String,target:String):Translator = synchronized(translators) {

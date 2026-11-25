@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.6.5-2859CC?style=flat-square" alt="Version 0.6.5">
+  <img src="https://img.shields.io/badge/version-0.6.6-2859CC?style=flat-square" alt="Version 0.6.6">
   <img src="https://img.shields.io/badge/Android-8.0%2B-536275?style=flat-square" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/ABI-ARM64-82996a?style=flat-square" alt="ARM64">
   <img src="https://img.shields.io/badge/status-development-74747B?style=flat-square" alt="In development">
@@ -32,7 +32,7 @@
 | GLOSSARY | 自动提取术语候选，分组、搜索、筛选、例句及确认 |
 | AUDIO | 前台麦克风服务、系统 TTS、通知栏结束会话 |
 
-字幕按语句对应排列，每段显示采集时间戳，停顿超过 60 秒后另起一组。Whisper 采用分段识别与滚动预识别，中英混说由 SenseVoice 辅助识别。俄语实时模式使用 T-one 流式预识别，句末由 Whisper 校正。点按已识别字幕可编辑原文或译文，修改原文后自动重译该句。
+字幕按语句对应排列，每段显示采集时间戳，停顿超过 60 秒后另起一组。Whisper 采用分段识别与滚动预识别，中文优先使用 SenseVoice 识别；中英俄分段识别可在实验模式中启用。俄语实时模式使用 T-one 流式预识别，句末由 Whisper 校正。点按已识别字幕可编辑原文或译文，修改原文后自动重译该句。
 
 自动模式下，中文译为俄语，俄语与英语译为简体中文。文字翻译也可以指定中文、英语或俄语为目标语言。
 
@@ -103,10 +103,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## 04 / Development
 
-当前版本 **0.6.5**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
+当前版本 **0.6.6**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
 
 | 版本 | 主要变化 |
 |:--|:--|
+| 0.6.6 | 中文优先识别、异常符号拦截、实验模式隔离 |
 | 0.6.5 | 改进语言切换检测、实验性声音事件字幕、记录日期层级 |
 | 0.6.4 | SenseVoice 英文大小写处理 |
 | 0.6.3 | 记录左滑删除与二次确认 |

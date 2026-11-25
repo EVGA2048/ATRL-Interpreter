@@ -114,6 +114,15 @@ internal class OrderedCompletion {
 private val spokenWords=Regex("[\\p{L}\\p{N}]+")
 /** Detect decoder loops, not ordinary emphasis or a single repeated word. */
 internal fun hasDecodeLoop(text:String):Boolean{
+    // Decoder loops also occur in punctuation and symbols, not just words.
+    val compact=text.filterNot{it.isWhitespace()}.take(512)
+    for(i in compact.indices){
+        if(compact[i].isLetterOrDigit())continue
+        for(period in 1..minOf(4,(compact.length-i)/5)){
+            if((0 until period).all{!compact[i+it].isLetterOrDigit()}&&
+                (period until period*5).all{compact[i+it]==compact[i+it%period]})return true
+        }
+    }
     val words=spokenWords.findAll(text.lowercase(java.util.Locale.ROOT)).map{it.value}.take(512).toList()
     for(i in words.indices){
         for(period in 1..minOf(8,(words.size-i)/4)){
@@ -129,7 +138,7 @@ internal fun hasDecodeLoop(text:String):Boolean{
     return false
 }
 internal fun plausibleCaption(text:String,samples:Int):Boolean {
-    if(text.isBlank()||hasDecodeLoop(text))return false
+    if(text.isBlank()||text.none{it.isLetterOrDigit()}||hasDecodeLoop(text))return false
     val seconds=samples.coerceAtLeast(1)/16000.0
     val words=spokenWords.findAll(text).count()
     val han=text.count{it in '\u4e00'..'\u9fff'}
@@ -157,7 +166,7 @@ internal fun asrLanguage(recognition:Recognition):String =
     else mixedCode(recognition.text,recognition.language)
 
 internal fun validCloudTranslation(raw:String,translated:String):Boolean =
-    translated.isNotBlank()&&!hasDecodeLoop(translated)&&translated.length<=maxOf(180,raw.length*8)
+    translated.any{it.isLetterOrDigit()}&&!hasDecodeLoop(translated)&&translated.length<=maxOf(180,raw.length*8)
 
 /** Token-level LCS highlights only inserted/replaced words, including Han characters. */
 private val editTokens=Regex("[\\p{IsHan}]|[\\p{L}\\p{M}\\p{N}&&[^\\p{IsHan}]]+|[^\\s]")
@@ -246,3 +255,12 @@ internal fun joinAcousticParts(parts:List<Recognition>):Recognition{
 /** Swiping only reveals an action; it never deletes a session. */
 internal fun shouldRevealDelete(offset:Float,width:Float,velocity:Float):Boolean =
     when{velocity>600f->false;velocity< -600f->true;else->offset< -width*.45f}
+
+/** Prefer SenseVoice for acoustically Chinese input; never substitute it for Russian. */
+internal fun chooseChineseCaption(primary:Recognition,candidate:String,samples:Int,forceChinese:Boolean=false):Recognition{
+    val scripts=scriptLanguages(candidate)
+    if(!plausibleCaption(candidate,samples)||"zh" !in scripts||"ru" in scripts)return primary
+    if(!forceChinese&&(primary.language!="zh"||"ru" in scriptLanguages(primary.text)))return primary
+    val normalized=normalizeSenseVoiceCase(candidate,primary.text)
+    return Recognition(normalized,mixedCode(normalized,"zh"))
+}

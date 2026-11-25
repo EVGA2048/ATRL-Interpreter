@@ -108,6 +108,7 @@ class MainActivity : ComponentActivity() {
     private var partial by mutableStateOf<Recognition?>(null)
     private var russianStreaming by mutableStateOf(false)
     private var mixedRecognition by mutableStateOf(false)
+    private var chineseRecognition by mutableStateOf(false)
     private val streamingWorker=Executors.newSingleThreadExecutor()
     private val editWorker=Executors.newFixedThreadPool(2)
     private data class SentenceEdit(val session:Long,val index:Int,val source:Boolean,val before:String,val selection:TextRange)
@@ -525,12 +526,13 @@ class MainActivity : ComponentActivity() {
                 var sourceMenu by remember{mutableStateOf(false)}
                 Box{
                     TextButton(onClick={sourceMenu=true},enabled=!recording&&!finishing,contentPadding=PaddingValues(horizontal=4.dp)){
-                        Text(if(mixedRecognition)"中英俄混合 ▾" else if(russianStreaming)"俄语实时 ▾" else "自动识别 ▾",fontSize=13.sp)
+                        Text(if(chineseRecognition)"中文优先 ▾" else if(mixedRecognition)"中英俄混合 ▾" else if(russianStreaming)"俄语实时 ▾" else "自动识别 ▾",fontSize=13.sp)
                     }
                     DropdownMenu(expanded=sourceMenu,onDismissRequest={sourceMenu=false}){
-                        DropdownMenuItem(text={Text("自动识别")},onClick={russianStreaming=false;mixedRecognition=false;sourceMenu=false})
-                        DropdownMenuItem(text={Text("俄语实时")},onClick={russianStreaming=true;mixedRecognition=false;sourceMenu=false})
-                        DropdownMenuItem(text={Text("中英俄混合")},onClick={russianStreaming=false;mixedRecognition=true;sourceMenu=false})
+                        DropdownMenuItem(text={Text("自动识别")},onClick={russianStreaming=false;mixedRecognition=false;chineseRecognition=false;sourceMenu=false})
+                        DropdownMenuItem(text={Text("俄语实时")},onClick={russianStreaming=true;mixedRecognition=false;chineseRecognition=false;sourceMenu=false})
+                        DropdownMenuItem(text={Text("中文优先")},onClick={russianStreaming=false;mixedRecognition=false;chineseRecognition=true;sourceMenu=false})
+                        DropdownMenuItem(text={Text("中英俄混合（实验）")},onClick={russianStreaming=false;mixedRecognition=true;chineseRecognition=false;sourceMenu=false})
                     }
                 }
                 Text(captureStatus,fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.weight(1f).padding(start=6.dp))
@@ -602,6 +604,7 @@ class MainActivity : ComponentActivity() {
         recording=true; captureStatus="正在聆听"; pending=0;partial=null;partialGeneration=-1;captureWarning="";meterHistory=List(30){0f};finalizer=null;playbackOrder.clear()
         val useNative=russianStreaming
         val useMixed=mixedRecognition
+        val useChinese=chineseRecognition
         val nativeFailed=AtomicBoolean(false)
         val nativeJobs=AtomicInteger(0)
         val native=if(useNative)StreamingRussian(assets) else null
@@ -664,7 +667,7 @@ class MainActivity : ComponentActivity() {
                             if(nativeFailed.get()||generation.get()!=epoch)return@execute
                             if(begin)native.start()
                             val text=native.feed(audio)
-                            if(text.isNotBlank()&&!hasDecodeLoop(text)&&generation.get()==epoch&&active.get())runOnUiThread{
+                            if(text.any{it.isLetterOrDigit()}&&!hasDecodeLoop(text)&&generation.get()==epoch&&active.get())runOnUiThread{
                                 if(current?.time==started&&active.get()&&generation.get()==epoch){
                                     partialGeneration=epoch;partial=Recognition(text,"ru")
                                 }
@@ -688,16 +691,16 @@ class MainActivity : ComponentActivity() {
                             asrJobs.incrementAndGet()
                             recognition.execute {
                                 try {
-                                    val result=engine.transcribe(samples,final=true,mixed=useMixed)
+                                    val result=engine.transcribe(samples,final=true,mixed=useMixed,chinese=useChinese)
                                     runOnUiThread {
                                         if(current?.time==started&&partialGeneration<=epoch)partial=null
-                                        if(result.text.isNotBlank()){
+                                        run{
                                             if(plausibleCaption(result.text,samples.size))enqueue(result.text,result.language,started,api,cloud,from,until)
                                             else {
                                                 captureWarning="部分语音未能可靠识别"
                                                 current?.takeIf{it.time==started}?.let{session->
                                                     val pos=session.items.size
-                                                    val failed=Segment(result.text,corrected="识别未完成",error="识别异常",language=result.language,time=until,startTime=from)
+                                                    val failed=Segment("",corrected="识别未完成",error="识别异常",language=result.language,time=until,startTime=from)
                                                     current=session.copy(items=session.items+failed);saveCurrent()
                                                     for(index in playbackOrder.mark(pos)){
                                                         val ready=current?.items?.getOrNull(index)
@@ -759,7 +762,7 @@ class MainActivity : ComponentActivity() {
                             val epoch=generation.get();lastPreview=previewSamples
                             recognition.execute{
                                 try{
-                                    val result=engine.transcribe(snapshot)
+                                    val result=engine.transcribe(snapshot,chinese=useChinese)
                                     if(result.text.isNotBlank()&&active.get()&&generation.get()==epoch)runOnUiThread{
                                         if(current?.time==started&&active.get()&&generation.get()==epoch){
                                             if(partialGeneration!=epoch)stabilizer.reset()
@@ -809,7 +812,7 @@ class MainActivity : ComponentActivity() {
         current=s.copy(items=s.items+base)
         saveCurrent();pending++
         val local=localTranslation.submit<String?>{
-            val translated=runCatching{engine.offline(raw,lang,target)}.getOrNull()
+            val translated=runCatching{engine.offline(raw,lang,target)}.getOrNull()?.takeIf{validCloudTranslation(raw,it)}
             if(!translated.isNullOrBlank())runOnUiThread{
                 val existing=current?.takeIf{it.time==id}?.items?.getOrNull(pos)
                 if(existing!=null&&existing.translated.isBlank()&&existing.error.isBlank())
@@ -1116,7 +1119,7 @@ class MainActivity : ComponentActivity() {
                 }
             },enabled=!downloading,shape=corner,modifier=Modifier.fillMaxWidth()){Text(if(downloading)"下载中…" else "下载 / 检查离线翻译模型")}
         }
-        Panel {Text("版本 0.6.5");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
+        Panel {Text("版本 0.6.6");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
     }
     private fun speak(text:String,language:String="") {
         if(text.isBlank())return

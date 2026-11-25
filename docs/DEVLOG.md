@@ -1,5 +1,12 @@
 # Development log
 
+## 0.6.6
+
+- Prefer SenseVoice for Chinese speech and add a Chinese-priority mode.
+- Keep experimental language segmentation out of automatic recognition.
+- Reject repetitive punctuation and symbol-only recognition or translation results; mark failed segments.
+- Twenty JVM tests passed. Chinese routing was compared on three synthetic speech samples on macOS; device accuracy remains unverified.
+
 ## 0.6.5
 
 - Improve acoustic language boundaries and probe English-dominant segments independently.

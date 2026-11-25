@@ -144,4 +144,20 @@ class PoliciesTest {
         assertNull(soundLabel(listOf(SoundScore("Speech",.9f),SoundScore("Cough",.05f))))
         assertEquals("[咳嗽]",soundEventText("咳嗽"))
     }
+    @Test fun rejectsPunctuationDecoderLoops(){
+        assertTrue(hasDecodeLoop("(".repeat(29)))
+        assertTrue(hasDecodeLoop("正常文字"+"()".repeat(12)))
+        assertFalse(plausibleCaption("...?!",32000))
+        assertFalse(plausibleCaption("你好"+"（".repeat(16),32000))
+        assertFalse(validCloudTranslation("你好","(".repeat(20)))
+        assertTrue(plausibleCaption("你好（测试）。",32000))
+    }
+    @Test fun chineseUsesNativeAcousticTranscriptWithoutOverridingRussian(){
+        val zh=Recognition("語音時別","zh")
+        assertEquals(Recognition("语音识别","zh"),chooseChineseCaption(zh,"语音识别",32000))
+        assertEquals(zh,chooseChineseCaption(zh,"(".repeat(20),32000))
+        val ru=Recognition("Проверка","ru")
+        assertEquals(ru,chooseChineseCaption(ru,"语音识别",32000))
+        assertEquals(Recognition("中文 test English","en+zh"),chooseChineseCaption(zh,"中文 test English",32000))
+    }
 }
