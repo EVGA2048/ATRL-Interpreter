@@ -18,4 +18,4 @@ Run `scripts/fetch-models.sh` to download and verify the artifacts.
 | `ced-tiny.int8.onnx` | `73aa22e783115f6a4ae169b36089907e07d0fd44795595eddea9c1bfc74cc945` |
 | `ced-labels.csv` | `cdd1049833c4b86127c2773ac0d14a2754b6a6d0d1798002ed5c66e699708429` |
 
-CED Tiny INT8: experimental audio tagging, exported by sherpa-onnx from [CED](https://github.com/RicherMans/CED). Review upstream code and weight redistribution terms before publishing a bundled APK.
+CED Tiny INT8: experimental audio tagging, exported by sherpa-onnx from [CED](https://github.com/RicherMans/CED). The upstream CED-Tiny model card lists Apache-2.0 for the weights. See [third-party notices](licenses/NOTICE.md). Binary release notices still need to be verified for the bundled ONNX Runtime.
