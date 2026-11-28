@@ -63,6 +63,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.semantics.semantics
@@ -111,6 +114,8 @@ class MainActivity : ComponentActivity() {
     private var mixedRecognition by mutableStateOf(false)
     private var chineseRecognition by mutableStateOf(false)
     private var invertedTranslation by mutableStateOf(false)
+    private var quickDraft by mutableStateOf("")
+    private var quickOnlySession:Long?=null
     private val streamingWorker=Executors.newSingleThreadExecutor()
     private val editWorker=Executors.newFixedThreadPool(2)
     private data class SentenceEdit(val session:Long,val index:Int,val source:Boolean,val before:String,val selection:TextRange)
@@ -461,13 +466,17 @@ class MainActivity : ComponentActivity() {
     @Composable private fun CaptionPair(s:Segment,sessionId:Long,index:Int,flipTranslation:Boolean=false){
         val scheme=MaterialTheme.colorScheme
         val done=s.translated.isNotBlank()
-        val rawColor by animateColorAsState(if(done)scheme.onSurface else scheme.onSurfaceVariant,tween(220),label="caption color")
+        val typedColor=if(isSystemInDarkTheme())Color(0xFF83D5BC) else Color(0xFF147A63)
+        val rawColor by animateColorAsState(if(s.typedInput)typedColor else if(done)scheme.onSurface else scheme.onSurfaceVariant,tween(220),label="caption color")
         var showRaw by remember(s.raw){mutableStateOf(false)}
         val corrected=s.corrected.isNotBlank()&&s.corrected!=s.raw
         Column(Modifier.fillMaxWidth().padding(vertical=7.dp),verticalArrangement=Arrangement.spacedBy(3.dp)){
-            Text(java.text.SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(java.util.Date(s.startTime)),
-                fontSize=10.sp,letterSpacing=.25.sp,color=scheme.onSurfaceVariant.copy(alpha=.78f),
-                fontWeight=FontWeight.Medium)
+            Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(7.dp)){
+                Text(java.text.SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(java.util.Date(s.startTime)),
+                    fontSize=10.sp,letterSpacing=.25.sp,color=scheme.onSurfaceVariant.copy(alpha=.78f),
+                    fontWeight=FontWeight.Medium)
+                if(s.typedInput)Text("键入",fontSize=10.sp,color=typedColor,fontWeight=FontWeight.Medium)
+            }
             if(s.soundEvent.isNotBlank()){
                 Text(soundEventText(s.soundEvent),fontSize=14.sp,fontWeight=FontWeight.Medium,color=scheme.onSurfaceVariant)
                 return@Column
@@ -480,7 +489,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             AnimatedVisibility(visible=done,enter=fadeIn(tween(220))+expandVertically(tween(180),expandFrom=Alignment.Top)){
-                EditableCaption(s.translated,s.translationBeforeEdit,scheme.primary,20,29,false,rotation=if(flipTranslation)180f else 0f){range->
+                EditableCaption(s.translated,s.translationBeforeEdit,if(s.typedInput)typedColor else scheme.primary,20,29,false,rotation=if(flipTranslation)180f else 0f){range->
                     sentenceEdit=SentenceEdit(sessionId,index,false,s.translated,range)
                 }
             }
@@ -586,8 +595,9 @@ class MainActivity : ComponentActivity() {
             current?.summary?.takeIf{it.isNotBlank()}?.let{
                 TextButton(onClick={viewed=current?.time;navigate("detail")}){Text("查看会话总结")}
             }
+            QuickInputBar(onSent={following=true})
             val scheme=MaterialTheme.colorScheme
-            Row(Modifier.fillMaxWidth().padding(top=10.dp,bottom=10.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){
+            Row(Modifier.fillMaxWidth().padding(top=8.dp,bottom=10.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){
                 val smoothLevel by animateFloatAsState(if(recording)level else 0f,tween(120),label="audio level")
                 val history=meterHistory
                 val meterColor=if(recording)scheme.primary else scheme.onSurfaceVariant.copy(alpha=.40f)
@@ -617,14 +627,78 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    @Composable private fun QuickInputBar(onSent:()->Unit){
+        val scheme=MaterialTheme.colorScheme
+        val typedColor=if(isSystemInDarkTheme())Color(0xFF83D5BC) else Color(0xFF147A63)
+        val canSend=!finishing&&quickInputText(quickDraft)!=null
+        fun send(){
+            if(sendQuickInput())onSent()
+        }
+        Surface(Modifier.fillMaxWidth().padding(top=8.dp),
+            shape=RoundedCornerShape(14.dp),color=scheme.surface.copy(alpha=.72f),
+            border=BorderStroke(1.dp,scheme.outline.copy(alpha=.45f))){
+            Row(Modifier.fillMaxWidth().heightIn(min=48.dp).padding(start=14.dp,end=4.dp),
+                verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(4.dp)){
+                BasicTextField(value=quickDraft,onValueChange={if(it.length<=2000)quickDraft=it},
+                    modifier=Modifier.weight(1f).padding(vertical=11.dp).semantics{contentDescription="快速输入文字"},
+                    enabled=!finishing,singleLine=true,textStyle=TextStyle(color=scheme.onSurface,fontSize=15.sp),
+                    cursorBrush=SolidColor(typedColor),
+                    keyboardOptions=KeyboardOptions(imeAction=ImeAction.Send),
+                    keyboardActions=KeyboardActions(onSend={send()}),
+                    decorationBox={inner->
+                        Box{
+                            if(quickDraft.isEmpty())Text("快速输入",fontSize=15.sp,color=scheme.onSurfaceVariant)
+                            inner()
+                        }
+                    })
+                IconButton(onClick={send()},enabled=canSend,
+                    modifier=Modifier.size(44.dp).semantics{contentDescription="发送并翻译"}){
+                    val ink=if(canSend)typedColor else scheme.onSurfaceVariant.copy(alpha=.40f)
+                    Box(Modifier.size(32.dp).clip(RoundedCornerShape(10.dp))
+                        .background(ink.copy(alpha=if(canSend).12f else .05f)),contentAlignment=Alignment.Center){
+                        Canvas(Modifier.size(19.dp)){
+                            val stroke=1.9.dp.toPx()
+                            drawLine(ink,Offset(size.width*.50f,size.height*.84f),Offset(size.width*.50f,size.height*.16f),stroke,StrokeCap.Round)
+                            drawLine(ink,Offset(size.width*.19f,size.height*.46f),Offset(size.width*.50f,size.height*.16f),stroke,StrokeCap.Round)
+                            drawLine(ink,Offset(size.width*.81f,size.height*.46f),Offset(size.width*.50f,size.height*.16f),stroke,StrokeCap.Round)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    private fun sendQuickInput():Boolean{
+        if(finishing)return false
+        val raw=quickInputText(quickDraft)?:return false
+        val lang=quickInputLanguage(raw,engine.detectText(raw)).ifBlank{return false}
+        val now=System.currentTimeMillis()
+        if((!recording&&current?.time!=quickOnlySession)||current==null){
+            if(pending!=0)return false
+            val id=maxOf(now,(sessions.maxOfOrNull{it.time}?:0L)+1L)
+            current=Session("会话 "+java.text.SimpleDateFormat("MM-dd HH:mm",Locale.getDefault()).format(java.util.Date(id)),emptyList(),time=id)
+            quickOnlySession=id
+            playbackOrder.clear()
+            captureStatus="就绪"
+            captureWarning=""
+        }
+        val id=current?.time?:return false
+        enqueue(raw,lang,id,api,cloud,now,now,typedInput=true)
+        quickDraft=""
+        return true
+    }
     private fun startCapture() {
         if(finishing || !active.compareAndSet(false,true))return
-        val started=System.currentTimeMillis()
-        current=Session("会话 "+java.text.SimpleDateFormat("MM-dd HH:mm",Locale.getDefault()).format(java.util.Date(started)),emptyList(),time=started)
+        val previous=current
+        val reuse=previous!=null&&quickOnlySession==previous.time
+        if(!reuse&&pending!=0){active.set(false);return}
+        val started=if(reuse)previous!!.time else maxOf(System.currentTimeMillis(),(sessions.maxOfOrNull{it.time}?:0L)+1L)
+        if(!reuse)current=Session("会话 "+java.text.SimpleDateFormat("MM-dd HH:mm",Locale.getDefault()).format(java.util.Date(started)),emptyList(),time=started)
         CaptureService.stopRequested = { runOnUiThread { stopCapture() } }
         try { startForegroundService(android.content.Intent(this,CaptureService::class.java)) }
-        catch(e:Exception) { active.set(false); CaptureService.stopRequested=null; captureStatus="无法启动录音服务：${e.message}"; return }
-        recording=true; captureStatus="正在聆听"; pending=0;partial=null;partialGeneration=-1;captureWarning="";meterHistory=List(30){0f};finalizer=null;playbackOrder.clear()
+        catch(e:Exception) { current=previous;active.set(false); CaptureService.stopRequested=null; captureStatus="无法启动录音服务：${e.message}"; return }
+        quickOnlySession=null
+        if(!reuse){pending=0;playbackOrder.clear()}
+        recording=true; captureStatus="正在聆听";partial=null;partialGeneration=-1;captureWarning="";meterHistory=List(30){0f};finalizer=null
         val useNative=russianStreaming
         val useMixed=mixedRecognition
         val useChinese=chineseRecognition
@@ -826,13 +900,13 @@ class MainActivity : ComponentActivity() {
             if(autoSpeak&&ready!=null&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
         }
     }
-    private fun enqueue(raw:String,language:String,id:Long,config:ApiConfig,online:Boolean,from:Long,until:Long) {
+    private fun enqueue(raw:String,language:String,id:Long,config:ApiConfig,online:Boolean,from:Long,until:Long,typedInput:Boolean=false) {
         val s=current?.takeIf{it.time==id}?:return
         val pos=s.items.size
         val lang=language.ifBlank{engine.detectText(raw)}
         val target=engine.targetFor(lang,"Auto")
-        val base=Segment(raw,language=lang,target=target,time=until,startTime=from)
-        current=s.copy(items=s.items+base)
+        val base=Segment(raw,language=lang,target=target,time=until,startTime=from,typedInput=typedInput)
+        current=s.copy(items=s.items+base,summary="")
         saveCurrent();pending++
         val local=localTranslation.submit<String?>{
             val translated=runCatching{engine.offline(raw,lang,target)}.getOrNull()?.takeIf{validCloudTranslation(raw,it)}
@@ -845,7 +919,7 @@ class MainActivity : ComponentActivity() {
         }
         (if(lang=="ru"||lang.contains("ru+"))russianNetwork else liveNetwork).execute {
             val snapshot=currentContextForWorker(id,pos)
-            val analysis=if(online&&config.key.isNotBlank())runCatching{engine.analyze(config,raw,snapshot.first,snapshot.second,target,true,lang)} else null
+            val analysis=if(online&&config.key.isNotBlank())runCatching{engine.analyze(config,raw,snapshot.first,snapshot.second,target,!typedInput,lang)} else null
             val a=analysis?.getOrNull()
             val final=if(a!=null)base.copy(corrected=raw,translated=a.translated,scene=a.scene)
             else {
@@ -908,12 +982,13 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    private fun canDeleteSession(id:Long)=current?.takeIf{recording||finishing}?.time!=id&&summaryBusy!=id
+    private fun canDeleteSession(id:Long)=current?.takeIf{recording||finishing||pending>0}?.time!=id&&summaryBusy!=id
     private fun deleteSession(id:Long){
         if(!canDeleteSession(id))return
         sessions=sessions.filterNot{it.time==id}
         archive.saveSessions(sessions)
         if(current?.time==id)current=null
+        if(quickOnlySession==id)quickOnlySession=null
         if(viewed==id)viewed=null
     }
     @Composable private fun NotesPage(){
@@ -1001,7 +1076,7 @@ class MainActivity : ComponentActivity() {
             Text(if(s.summary.isBlank())"尚未生成总结" else s.summary)
             Button(onClick={summarize(s)},enabled=summaryBusy==null&&current?.takeIf{recording||finishing}?.time!=s.time,shape=corner){Text(if(summaryBusy==s.time)"总结中…" else "生成总结")}
             var confirm by remember {mutableStateOf(false)}
-            TextButton(onClick={confirm=true},enabled=current?.takeIf{recording||finishing}?.time!=s.time&&summaryBusy!=s.time){Text("删除记录")}
+            TextButton(onClick={confirm=true},enabled=canDeleteSession(s.time)){Text("删除记录")}
             if(confirm)AlertDialog(onDismissRequest={confirm=false},title={Text("删除此会话？")},confirmButton={TextButton(onClick={deleteSession(s.time);navigate("notes")}){Text("删除")}},dismissButton={TextButton(onClick={confirm=false}){Text("取消")}})
         }
         Panel{s.items.forEachIndexed{i,item->if(newGroup(s.items,i))GroupTime(item);CaptionPair(item,s.time,i)}}
@@ -1142,7 +1217,7 @@ class MainActivity : ComponentActivity() {
                 }
             },enabled=!downloading,shape=corner,modifier=Modifier.fillMaxWidth()){Text(if(downloading)"下载中…" else "下载 / 检查离线翻译模型")}
         }
-        Panel {Text("版本 0.6.7");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
+        Panel {Text("版本 0.6.8");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
     }
     private fun speak(text:String,language:String="") {
         if(text.isBlank())return

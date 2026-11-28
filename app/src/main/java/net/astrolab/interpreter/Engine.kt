@@ -12,7 +12,7 @@ import javax.net.ssl.HttpsURLConnection
 import java.util.concurrent.TimeUnit
 
 data class Term(val ru: String, val zh: String, val count: Int = 1, val approved: Boolean = false, val category: String = "未分类", val example: String = "", val language: String = "ru")
-data class Segment(val raw: String, val corrected: String = raw, val translated: String = "", val scene: String = "", val time: Long = System.currentTimeMillis(), val error: String = "", val language: String = "", val target: String = "", val startTime: Long = time, val manualRevision:Int=0, val sourceBeforeEdit:String?=null, val translationBeforeEdit:String?=null, val soundEvent:String="")
+data class Segment(val raw: String, val corrected: String = raw, val translated: String = "", val scene: String = "", val time: Long = System.currentTimeMillis(), val error: String = "", val language: String = "", val target: String = "", val startTime: Long = time, val manualRevision:Int=0, val sourceBeforeEdit:String?=null, val translationBeforeEdit:String?=null, val soundEvent:String="", val typedInput:Boolean=false)
 data class Session(val title: String, val items: List<Segment>, val summary: String = "", val time: Long = System.currentTimeMillis())
 data class Recognition(val text: String, val language: String)
 data class Analysis(val corrected: String, val translated: String, val scene: String, val terms: List<Term>)

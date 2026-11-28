@@ -273,3 +273,9 @@ internal fun isIncompleteChineseCandidate(primary:String,candidate:String,sample
     val b=candidate.count{it in '\u4e00'..'\u9fff'}
     return a>=6&&b*2<a
 }
+
+/** Typed text is user-authored, not an ASR hypothesis: keep punctuation and repetition. */
+internal fun quickInputText(value:String):String? =
+    value.trim().takeIf{it.isNotEmpty()&&it.length<=2000&&it.any{c->c.isLetterOrDigit()}}
+internal fun quickInputLanguage(value:String,fallback:String):String =
+    mixedCode(value,fallback).ifBlank{"zh"}

@@ -1,5 +1,11 @@
 # Development log
 
+## 0.6.8
+
+- Add a compact translucent quick input bar to live interpretation. Submit typed text without interrupting the microphone.
+- Preserve typed origin in session history with a distinct teal caption color, separate from correction highlighting.
+- Allow text-only conversations to continue when recording starts, retaining pending translation jobs.
+
 ## 0.6.7
 
 - Add a live interpretation header toggle to rotate translated captions 180 degrees without altering source text or archives.

@@ -170,4 +170,19 @@ class PoliciesTest {
         assertEquals("ru+zh",asrLanguage(Recognition("今天 изучаем сигналы","ru")))
         assertEquals("ru",asrLanguage(Recognition("Система ETCS","ru")))
     }
+    @Test fun quickInputPreservesUserAuthoredText(){
+        assertEquals("你好 test English",quickInputText(" 你好 test English "))
+        assertEquals("哈哈哈哈哈哈！！！",quickInputText("哈哈哈哈哈哈！！！"))
+        assertNull(quickInputText("   "))
+        assertNull(quickInputText("a".repeat(2001)))
+        assertEquals("en+ru+zh",quickInputLanguage("我想要 test English и русский","zh"))
+        assertEquals("zh",quickInputLanguage("123",""))
+    }
+    @Test fun typedOriginSurvivesTranslationAndManualCorrection(){
+        val typed=Segment("明天几点上课",typedInput=true,time=123L)
+        assertTrue(typed.copy(translated="Когда занятия?").typedInput)
+        assertTrue(typed.copy(corrected="明天几点开始上课",manualRevision=1).typedInput)
+        assertFalse(Segment("语音输入").typedInput)
+        assertEquals(123L,typed.copy(translated="Когда занятия?").startTime)
+    }
 }
