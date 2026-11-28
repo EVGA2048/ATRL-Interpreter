@@ -334,3 +334,17 @@ internal fun summaryAvailability(cloud:Boolean,hasKey:Boolean,connected:Boolean)
 internal fun networkTransitionNotice(previous:Boolean?,connected:Boolean):String? =
     if(previous==connected||(previous==null&&connected))null
     else if(connected)"网络已恢复" else "网络已断开，继续本地处理"
+
+/** Never send credentials for a compatible third-party API to DeepSeek. */
+internal fun supportsDeepSeekBalance(endpoint:String):Boolean = runCatching{
+    val uri=java.net.URI(endpoint.trim())
+    uri.scheme.equals("https",true)&&uri.host.equals("api.deepseek.com",true)&&
+        uri.userInfo==null&&(uri.port==-1||uri.port==443)&&uri.query==null&&uri.fragment==null&&
+        uri.path.trimEnd('/') in setOf("","/v1","/chat/completions","/v1/chat/completions")
+}.getOrDefault(false)
+internal data class BalanceAmount(val currency:String,val total:String,val granted:String,val toppedUp:String)
+internal data class AccountBalance(val available:Boolean,val amounts:List<BalanceAmount>)
+internal fun displayBalance(currency:String,amount:String):String {
+    val value=amount.toBigDecimalOrNull()?.setScale(2,java.math.RoundingMode.HALF_UP)?.toPlainString()?:return "—"
+    return when(currency){"CNY"->"¥"+value;"USD"->"$"+value;else->"$currency $value"}
+}

@@ -35,6 +35,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
@@ -1338,6 +1341,23 @@ class MainActivity : ComponentActivity() {
         var edit by remember{mutableStateOf(api)}
         var show by remember{mutableStateOf(false)}
         val focus=LocalFocusManager.current
+        val supported=supportsDeepSeekBalance(api.endpoint)
+        val canQuery=supported&&api.key.isNotBlank()&&cloud&&networkConnected
+        var balance by remember(api){mutableStateOf<AccountBalance?>(null)}
+        var balanceError by remember(api){mutableStateOf("")}
+        var balanceLoading by remember(api){mutableStateOf(false)}
+        var balanceTime by remember(api){mutableStateOf<Long?>(null)}
+        var refresh by remember{mutableIntStateOf(0)}
+        LaunchedEffect(api,canQuery,refresh){
+            if(!canQuery){balanceLoading=false;return@LaunchedEffect}
+            balanceLoading=true;balanceError=""
+            try{
+                val result=withContext(Dispatchers.IO){engine.accountBalance(api)}
+                balance=result;balanceTime=System.currentTimeMillis()
+            }catch(e:CancellationException){throw e}
+            catch(_:Exception){balanceError="无法查询余额"}
+            finally{balanceLoading=false}
+        }
         Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(25.dp)){
             SettingsSection("网络",footer="启用网络模式可使用云端翻译、会话纪要和术语提取。语音识别不受网络连接影响。"){
                 Row(Modifier.fillMaxWidth().heightIn(min=52.dp).padding(horizontal=16.dp,vertical=6.dp),verticalAlignment=Alignment.CenterVertically){
@@ -1365,6 +1385,35 @@ class MainActivity : ComponentActivity() {
                         }.onFailure{message="无法保存配置，请重试。"}
                     }.padding(horizontal=16.dp,vertical=14.dp))
             }
+            if(supported){
+                SettingsSection("DeepSeek 账户",footer=when{
+                    api.key.isBlank()->"保存 API Key 后可查询账户余额。"
+                    !cloud->"启用网络模式后可查询余额。"
+                    !networkConnected->"联网后更新余额。"
+                    balanceError.isNotBlank()->"无法更新余额，请稍后重试。"
+                    balance?.available==false->"当前账户余额不足，API 调用可能受限。"
+                    balanceTime!=null->"上次更新 "+java.text.SimpleDateFormat("HH:mm",Locale.getDefault()).format(java.util.Date(balanceTime!!))
+                    else->null
+                }){
+                    val amounts=balance?.amounts.orEmpty()
+                    if(amounts.isEmpty()){
+                        SettingsRow("可用余额",value=if(balanceLoading)"正在查询…" else "—")
+                    }else amounts.forEachIndexed{i,item->
+                        if(i>0)SettingsDivider()
+                        SettingsRow("可用余额",value=displayBalance(item.currency,item.total))
+                        SettingsDivider()
+                        SettingsRow("充值余额",value=displayBalance(item.currency,item.toppedUp))
+                        SettingsDivider()
+                        SettingsRow("赠金余额",value=displayBalance(item.currency,item.granted))
+                    }
+                    SettingsDivider()
+                    Row(Modifier.fillMaxWidth().heightIn(min=46.dp).clickable(enabled=canQuery&&!balanceLoading){refresh++}
+                        .padding(horizontal=16.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically){
+                        Text("刷新余额",fontSize=16.sp,color=if(canQuery)scheme.primary else scheme.onSurfaceVariant,modifier=Modifier.weight(1f))
+                        if(balanceLoading)CircularProgressIndicator(Modifier.size(16.dp),strokeWidth=2.dp)
+                    }
+                }
+            }
             SettingsSection("离线使用",footer="请提前下载语言包，以便在没有网络连接时使用翻译。"){
                 SettingsRow("语音识别",value="已内置",subtitle="简体中文、英语、俄语")
                 SettingsDivider()
@@ -1391,8 +1440,8 @@ class MainActivity : ComponentActivity() {
                 SettingsDivider()
                 SettingsRow("录音",value="不保存")
             }
-            SettingsSection("关于 Interpreter"){
-                SettingsRow("版本",value="0.6.12")
+            SettingsSection("关于"){
+                SettingsRow("版本",value="0.6.13")
                 SettingsDivider()
                 SettingsRow("GitHub",subtitle="EVGA2048/ATRL-Interpreter",onClick={
                     runCatching{startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
@@ -1401,9 +1450,12 @@ class MainActivity : ComponentActivity() {
                 })
             }
             Column(Modifier.fillMaxWidth().padding(top=2.dp,bottom=18.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(6.dp)){
-                Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(5.dp)){
-                    Text("ASTROLAB",fontSize=16.sp,letterSpacing=1.7.sp,fontWeight=FontWeight.Medium,color=scheme.onSurface)
-                    Canvas(Modifier.size(9.dp)){drawPath(Path().apply{moveTo(size.width,0f);lineTo(size.width,size.height);lineTo(0f,size.height);close()},cobalt)}
+                Row(verticalAlignment=Alignment.CenterVertically){
+                    Text("// ASTROLAB",fontSize=14.sp,letterSpacing=.7.sp,fontWeight=FontWeight.Medium,color=scheme.onSurface)
+                    Spacer(Modifier.width(4.dp))
+                    Canvas(Modifier.size(8.dp).offset(y=3.dp)){drawPath(Path().apply{moveTo(size.width,0f);lineTo(size.width,size.height);lineTo(0f,size.height);close()},cobalt)}
+                    Spacer(Modifier.width(2.dp))
+                    Text("Interpreter",fontSize=14.sp,fontWeight=FontWeight.Medium,color=scheme.onSurface)
                 }
                 Text("Developed by node0",fontSize=12.sp,color=scheme.onSurfaceVariant)
                 Text("© 2026 ASTROLAB. All rights reserved.",fontSize=11.sp,color=scheme.onSurfaceVariant)

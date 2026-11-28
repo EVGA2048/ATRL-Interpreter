@@ -170,6 +170,32 @@ class Engine(private val context: Context) {
         val capabilities=cm.getNetworkCapabilities(cm.activeNetwork)
         capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)==true
     }.getOrDefault(false)
+    /** Read-only account request; independent of chat completion rate-limit state. */
+    internal fun accountBalance(api:ApiConfig):AccountBalance {
+        require(supportsDeepSeekBalance(api.endpoint)){"余额查询仅适用于 DeepSeek 官方 API"}
+        require(api.key.isNotBlank()){"请先保存 API Key"}
+        check(cloudAllowed&&hasInternetConnection()){"网络不可用"}
+        val c=URL("https://api.deepseek.com/user/balance").openConnection() as HttpsURLConnection
+        c.instanceFollowRedirects=false
+        c.requestMethod="GET";c.connectTimeout=8000;c.readTimeout=12000
+        c.setRequestProperty("Authorization","Bearer "+api.key)
+        c.setRequestProperty("Accept","application/json")
+        synchronized(connectionLock){check(cloudAllowed){"Local mode"};connections.add(c)}
+        try{
+            check(cloudAllowed){"Local mode"}
+            val code=c.responseCode
+            require(code==200){if(code==401||code==403)"请检查 API Key" else "无法查询余额（HTTP $code）"}
+            val json=JSONObject(c.inputStream.bufferedReader().use{it.readText()})
+            val data=json.getJSONArray("balance_infos")
+            val amounts=(0 until data.length()).map{i->
+                val item=data.getJSONObject(i)
+                BalanceAmount(item.getString("currency"),item.getString("total_balance"),
+                    item.getString("granted_balance"),item.getString("topped_up_balance"))
+            }
+            check(cloudAllowed){"Local mode"}
+            return AccountBalance(json.getBoolean("is_available"),amounts)
+        }finally{synchronized(connectionLock){connections.remove(c)};c.disconnect()}
+    }
     private fun request(api: ApiConfig, system: String, user: String): JSONObject {
         check(cloudAllowed) { "Local mode" }
         check(hasInternetConnection()) { "No network connection" }

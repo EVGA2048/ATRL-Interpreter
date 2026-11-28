@@ -224,4 +224,15 @@ class PoliciesTest {
         assertEquals("网络已断开，继续本地处理",networkTransitionNotice(true,false))
         assertEquals("网络已恢复",networkTransitionNotice(false,true))
     }
+    @Test fun balanceOnlyUsesOfficialDeepSeekEndpoint(){
+        assertTrue(supportsDeepSeekBalance("https://api.deepseek.com"))
+        assertTrue(supportsDeepSeekBalance("https://api.deepseek.com/v1/"))
+        assertFalse(supportsDeepSeekBalance("https://api.deepseek.com.example.com"))
+        assertFalse(supportsDeepSeekBalance("https://api.deepseek.com@other.example"))
+        assertFalse(supportsDeepSeekBalance("http://api.deepseek.com"))
+        assertFalse(supportsDeepSeekBalance("https://api.deepseek.com:8443"))
+        assertEquals("¥12.30",displayBalance("CNY","12.3"))
+        assertEquals("$0.00",displayBalance("USD","0"))
+        assertEquals("—",displayBalance("CNY","invalid"))
+    }
 }

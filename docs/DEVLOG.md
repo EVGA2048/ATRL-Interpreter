@@ -1,5 +1,11 @@
 # Development log
 
+## 0.6.13
+
+- Query DeepSeek account balance via the official read-only endpoint when opening settings or refreshing. Only use credentials configured for the official API host; respect local mode.
+- Display available, topped-up and granted balances with currency and update time.
+- Tighten ASTROLAB / Interpreter footer typography.
+
 ## 0.6.12
 
 - Adopt inset grouped settings rows, consistent typography and section footers.

@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.6.12-2859CC?style=flat-square" alt="Version 0.6.12">
+  <img src="https://img.shields.io/badge/version-0.6.13-2859CC?style=flat-square" alt="Version 0.6.13">
   <img src="https://img.shields.io/badge/Android-8.0%2B-536275?style=flat-square" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/ABI-ARM64-82996a?style=flat-square" alt="ARM64">
   <img src="https://img.shields.io/badge/status-development-74747B?style=flat-square" alt="In development">
@@ -103,10 +103,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## 04 / Development
 
-当前版本 **0.6.12**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
+当前版本 **0.6.13**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
 
 | 版本 | 主要变化 |
 |:--|:--|
+| 0.6.13 | DeepSeek 账户余额查询、品牌署名调整 |
 | 0.6.12 | 设置页列表布局与界面文案调整 |
 | 0.6.11 | 设置页排版、开发者信息与断网状态提示 |
 | 0.6.10 | 离线会话保留、联网后 AI 整理与待整理状态 |
