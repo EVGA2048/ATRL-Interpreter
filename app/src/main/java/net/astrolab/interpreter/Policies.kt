@@ -279,3 +279,41 @@ internal fun quickInputText(value:String):String? =
     value.trim().takeIf{it.isNotEmpty()&&it.length<=2000&&it.any{c->c.isLetterOrDigit()}}
 internal fun quickInputLanguage(value:String,fallback:String):String =
     mixedCode(value,fallback).ifBlank{"zh"}
+
+/** Non-speech captions are localized locally, with no translation request. */
+internal fun localizedSoundEvent(label:String,language:String):String {
+    val name=when(language){
+        "ru"->when(label){"咳嗽"->"Кашель";"音乐"->"Музыка";"笑声"->"Смех";"掌声"->"Аплодисменты";"打喷嚏"->"Чихание";else->label}
+        "en"->when(label){"咳嗽"->"Cough";"音乐"->"Music";"笑声"->"Laughter";"掌声"->"Applause";"打喷嚏"->"Sneezing";else->label}
+        else->label
+    }
+    return soundEventText(name)
+}
+internal fun soundEventTarget(items:List<Segment>,at:Long):String =
+    items.asReversed().firstNotNullOfOrNull{item->
+        if(item.soundEvent.isNotBlank()||item.startTime>at)null
+        else if("ru" in item.language.split('+')||item.target=="ru")"ru"
+        else if("en" in item.language.split('+')||item.target=="en")"en"
+        else null
+    }?:"ru"
+
+/** Keep meaningful text, including uncertain fragments, in actual capture order. */
+internal fun summarySpeech(items:List<Segment>):List<Segment> =
+    items.filter{it.soundEvent.isBlank()&&(it.raw.isNotBlank()||it.corrected.isNotBlank()||it.translated.isNotBlank())}
+        .sortedBy{it.startTime}
+
+internal fun summaryChunks(items:List<Segment>,maxChars:Int=18000,maxEntries:Int=120):List<List<Segment>> {
+    require(maxChars>0&&maxEntries>0)
+    val out=mutableListOf<List<Segment>>()
+    var chunk=mutableListOf<Segment>()
+    var size=0
+    for(item in summarySpeech(items)){
+        val n=item.raw.length+item.corrected.length+item.translated.length+item.error.length+180
+        if(chunk.isNotEmpty()&&(size+n>maxChars||chunk.size>=maxEntries)){
+            out.add(chunk);chunk=mutableListOf();size=0
+        }
+        chunk.add(item);size+=n
+    }
+    if(chunk.isNotEmpty())out.add(chunk)
+    return out
+}

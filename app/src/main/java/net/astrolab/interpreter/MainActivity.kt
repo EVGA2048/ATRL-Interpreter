@@ -130,6 +130,7 @@ class MainActivity : ComponentActivity() {
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var summaryBusy by mutableStateOf<Long?>(null)
+    private var summaryErrors by mutableStateOf<Map<Long,String>>(emptyMap())
     private val active = AtomicBoolean(false)
     private val asrJobs = AtomicInteger(0)
     private val soundDetector by lazy { SoundDetector(assets) }
@@ -479,6 +480,9 @@ class MainActivity : ComponentActivity() {
             }
             if(s.soundEvent.isNotBlank()){
                 Text(soundEventText(s.soundEvent),fontSize=14.sp,fontWeight=FontWeight.Medium,color=scheme.onSurfaceVariant)
+                Text(s.translated.ifBlank{localizedSoundEvent(s.soundEvent,s.target.ifBlank{"ru"})},
+                    modifier=Modifier.fillMaxWidth().rotate(if(flipTranslation)180f else 0f),
+                    fontSize=14.sp,fontWeight=FontWeight.Medium,color=scheme.onSurfaceVariant)
                 return@Column
             }
             if(showRaw)SelectionContainer{Text(s.raw,fontSize=16.sp,lineHeight=24.sp,color=rawColor)}
@@ -592,8 +596,21 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-            current?.summary?.takeIf{it.isNotBlank()}?.let{
-                TextButton(onClick={viewed=current?.time;navigate("detail")}){Text("查看会话总结")}
+            if(current?.time!=null&&summaryBusy==current?.time){
+                Row(Modifier.padding(horizontal=8.dp,vertical=5.dp),verticalAlignment=Alignment.CenterVertically){
+                    CircularProgressIndicator(Modifier.size(14.dp),strokeWidth=2.dp)
+                    Spacer(Modifier.width(8.dp));Text("正在整理会话纪要…",fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }else current?.let{session->
+                if(session.summary.isNotBlank()){
+                    TextButton(onClick={viewed=session.time;navigate("detail")}){Text("查看会话纪要")}
+                }else if(!recording&&!finishing&&pending==0&&summarySpeech(session.items).isNotEmpty()){
+                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                        Text(summaryErrors[session.time]?:if(!cloud||api.key.isBlank())"纪要需要联网及 API" else "尚未生成纪要",
+                            modifier=Modifier.weight(1f).padding(start=8.dp),fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        TextButton(onClick={summarize(session)},enabled=summaryBusy==null){Text(if(summaryErrors.containsKey(session.time))"重试" else "生成纪要")}
+                    }
+                }
             }
             QuickInputBar(onSent={following=true})
             val scheme=MaterialTheme.colorScheme
@@ -801,7 +818,7 @@ class MainActivity : ComponentActivity() {
                                                     current=session.copy(items=session.items+failed);saveCurrent()
                                                     for(index in playbackOrder.mark(pos)){
                                                         val ready=current?.items?.getOrNull(index)
-                                                        if(autoSpeak&&ready!=null&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
+                                                        if(autoSpeak&&ready!=null&&ready.soundEvent.isBlank()&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
                                                     }
                                                 }
                                             }
@@ -893,11 +910,12 @@ class MainActivity : ComponentActivity() {
     private fun appendSoundEvent(id:Long,label:String,from:Long,until:Long){
         val session=current?.takeIf{it.time==id}?:return
         val pos=session.items.size
-        val event=Segment(soundEventText(label),language="",time=until,startTime=from,soundEvent=label)
+        val target=soundEventTarget(session.items,from)
+        val event=Segment(soundEventText(label),translated=localizedSoundEvent(label,target),language="",target=target,time=until,startTime=from,soundEvent=label)
         current=session.copy(items=session.items+event);saveCurrent()
         for(index in playbackOrder.mark(pos)){
             val ready=current?.items?.getOrNull(index)
-            if(autoSpeak&&ready!=null&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
+            if(autoSpeak&&ready!=null&&ready.soundEvent.isBlank()&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
         }
     }
     private fun enqueue(raw:String,language:String,id:Long,config:ApiConfig,online:Boolean,from:Long,until:Long,typedInput:Boolean=false) {
@@ -935,7 +953,7 @@ class MainActivity : ComponentActivity() {
                 pending=(pending-1).coerceAtLeast(0)
                 for(index in playbackOrder.mark(pos)){
                     val ready=current?.takeIf{it.time==id}?.items?.getOrNull(index)
-                    if(autoSpeak&&ready!=null&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
+                    if(autoSpeak&&ready!=null&&ready.soundEvent.isBlank()&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
                 }
                 finishWhenReady()
             }
@@ -967,17 +985,20 @@ class MainActivity : ComponentActivity() {
         CaptureService.stopRequested=null; stopService(android.content.Intent(this,CaptureService::class.java))
         val s=current?.takeIf{it.time==id}?:return
         saveCurrent()
-        if(s.items.isNotEmpty()&&online&&config.key.isNotBlank()) summarize(s,config)
+        if(summarySpeech(s.items).isNotEmpty()&&online&&config.key.isNotBlank()) summarize(s,config)
     }
     private fun summarize(s:Session,config:ApiConfig=api) {
         if(summaryBusy!=null)return
-        if(!cloud||config.key.isBlank()){message="总结需要启用云端并配置 API";return}
+        if(current?.time==s.time&&(recording||finishing||pending>0))return
+        if(summarySpeech(s.items).isEmpty()){message="没有可供总结的文字记录";return}
+        if(!cloud||config.key.isBlank()){summaryErrors=summaryErrors+(s.time to "纪要需要启用云端并配置 API");return}
+        summaryErrors=summaryErrors-s.time
         summaryBusy=s.time
         network.execute {
             val result=runCatching{engine.summarize(config,s.items)}
             runOnUiThread {
                 result.onSuccess{v->sessionFor(s.time)?.takeIf{it.items==s.items}?.let{latest->val updated=latest.copy(summary=v);persist(updated);if(current?.time==s.time)current=updated}}
-                    .onFailure{message="总结失败：${it.message}"}
+                    .onFailure{summaryErrors=summaryErrors+(s.time to "纪要生成失败，请重试")}
                 summaryBusy=null
             }
         }
@@ -989,6 +1010,7 @@ class MainActivity : ComponentActivity() {
         archive.saveSessions(sessions)
         if(current?.time==id)current=null
         if(quickOnlySession==id)quickOnlySession=null
+        summaryErrors=summaryErrors-id
         if(viewed==id)viewed=null
     }
     @Composable private fun NotesPage(){
@@ -1073,8 +1095,24 @@ class MainActivity : ComponentActivity() {
         if(s==null){Text("记录不存在");return}
         Text(java.text.SimpleDateFormat("yyyy年 M月 d日 HH:mm",Locale.CHINA).format(java.util.Date(s.time)),fontSize=20.sp,fontWeight=FontWeight.SemiBold)
         Panel {
-            Text(if(s.summary.isBlank())"尚未生成总结" else s.summary)
-            Button(onClick={summarize(s)},enabled=summaryBusy==null&&current?.takeIf{recording||finishing}?.time!=s.time,shape=corner){Text(if(summaryBusy==s.time)"总结中…" else "生成总结")}
+            Text("会话纪要",fontSize=18.sp,fontWeight=FontWeight.SemiBold)
+            if(s.summary.isBlank())Text(if(summaryBusy==s.time)"正在整理办理经过与具体信息…" else "尚未生成纪要",color=MaterialTheme.colorScheme.onSurfaceVariant,fontSize=14.sp)
+            else SelectionContainer{
+                Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
+                    s.summary.lineSequence().filter{it.isNotBlank()}.forEach{line->
+                        val heading=line.trim().startsWith("## ")
+                        Text(if(heading)line.trim().removePrefix("## ") else line.trim().replace("**",""),
+                            fontSize=if(heading)16.sp else 14.sp,lineHeight=if(heading)23.sp else 21.sp,
+                            fontWeight=if(heading)FontWeight.SemiBold else FontWeight.Normal,
+                            modifier=Modifier.padding(top=if(heading)8.dp else 0.dp))
+                    }
+                }
+            }
+            summaryErrors[s.time]?.let{Text(it,fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+            Row(verticalAlignment=Alignment.CenterVertically){
+                Button(onClick={summarize(s)},enabled=summaryBusy==null&&current?.takeIf{recording||finishing||pending>0}?.time!=s.time&&summarySpeech(s.items).isNotEmpty(),shape=corner){Text(if(summaryBusy==s.time)"整理中…" else if(s.summary.isBlank())"生成纪要" else "重新生成")}
+                if(s.summary.isNotBlank())TextButton(onClick={copyText(s.summary)}){Text("复制")}
+            }
             var confirm by remember {mutableStateOf(false)}
             TextButton(onClick={confirm=true},enabled=canDeleteSession(s.time)){Text("删除记录")}
             if(confirm)AlertDialog(onDismissRequest={confirm=false},title={Text("删除此会话？")},confirmButton={TextButton(onClick={deleteSession(s.time);navigate("notes")}){Text("删除")}},dismissButton={TextButton(onClick={confirm=false}){Text("取消")}})
@@ -1217,7 +1255,7 @@ class MainActivity : ComponentActivity() {
                 }
             },enabled=!downloading,shape=corner,modifier=Modifier.fillMaxWidth()){Text(if(downloading)"下载中…" else "下载 / 检查离线翻译模型")}
         }
-        Panel {Text("版本 0.6.8");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
+        Panel {Text("版本 0.6.9");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
     }
     private fun speak(text:String,language:String="") {
         if(text.isBlank())return

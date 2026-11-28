@@ -185,4 +185,24 @@ class PoliciesTest {
         assertFalse(Segment("语音输入").typedInput)
         assertEquals(123L,typed.copy(translated="Когда занятия?").startTime)
     }
+    @Test fun localizesSoundEventsWithoutNetwork(){
+        assertEquals("[Кашель]",localizedSoundEvent("咳嗽","ru"))
+        assertEquals("[Music]",localizedSoundEvent("音乐","en"))
+        assertEquals("[Смех]",localizedSoundEvent("笑声","ru"))
+        assertEquals("[Аплодисменты]",localizedSoundEvent("掌声","ru"))
+        assertEquals("[Sneezing]",localizedSoundEvent("打喷嚏","en"))
+        assertEquals("ru",soundEventTarget(emptyList(),20L))
+        assertEquals("en",soundEventTarget(listOf(Segment("hello",language="en",time=10L)),20L))
+    }
+    @Test fun summaryChunksPreserveChronologicalFactsAndExcludeSoundEvents(){
+        val a=Segment("套餐 500 卢布",time=20L,typedInput=true)
+        val b=Segment("Паспорт",time=10L,translated="护照")
+        val c=Segment("[咳嗽]",time=15L,soundEvent="咳嗽")
+        val d=Segment("",corrected="识别未完成",time=30L,error="识别异常")
+        val chunks=summaryChunks(listOf(a,c,d,b),maxEntries=1)
+        assertEquals(listOf(b,a,d),chunks.flatten())
+        assertEquals(3,chunks.size)
+        assertTrue(summaryChunks(listOf(c)).isEmpty())
+        assertEquals(listOf(b,a,d),summaryChunks(listOf(d,a,b),maxChars=1).flatten())
+    }
 }

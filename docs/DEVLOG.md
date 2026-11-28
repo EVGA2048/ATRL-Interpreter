@@ -1,5 +1,11 @@
 # Development log
 
+## 0.6.9
+
+- Localize sound labels into Russian or English using nearby dialogue context; exclude labels from TTS and summary inputs.
+- Generate detailed chronological session notes with confirmed outcomes, concrete fees and terms, follow-up actions, timestamps and uncertainties. Chunk long transcripts before synthesis.
+- Render readable summary sections and support copying notes. Cloud API still required for generation.
+
 ## 0.6.8
 
 - Add a compact translucent quick input bar to live interpretation. Submit typed text without interrupting the microphone.
