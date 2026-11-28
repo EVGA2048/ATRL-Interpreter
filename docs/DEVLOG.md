@@ -1,5 +1,11 @@
 # Development log
 
+## 0.6.10
+
+- Detect disconnected networks and avoid unnecessary cloud requests while preserving local transcripts.
+- Derive pending AI summary status from persisted session contents, so offline sessions can be summarized after reconnecting or restarting the app.
+- Interpret untranslated source text directly during AI summarization; require explicit action for historical records and respect local-only mode.
+
 ## 0.6.9
 
 - Localize sound labels into Russian or English using nearby dialogue context; exclude labels from TTS and summary inputs.

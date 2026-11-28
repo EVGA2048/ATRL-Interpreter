@@ -94,6 +94,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var settings: ApiSettings
     private var api by mutableStateOf(ApiConfig())
     private var cloud by mutableStateOf(true)
+    private var networkConnected by mutableStateOf(false)
+    private var connectivityManager:android.net.ConnectivityManager?=null
+    private var connectivityCallback:android.net.ConnectivityManager.NetworkCallback?=null
     private var page by mutableStateOf("text")
     private var message by mutableStateOf("")
     private var draft by mutableStateOf("")
@@ -150,6 +153,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(statusBarStyle=SystemBarStyle.auto(0xFFF5F5F7.toInt(),0xFF101113.toInt()),navigationBarStyle=SystemBarStyle.auto(0xFFFFFFFF.toInt(),0xFF1D1E21.toInt()))
         engine = Engine(applicationContext)
+        observeConnectivity()
         archive = Archive(this); settings = ApiSettings(this)
         runCatching { settings.load() }.onSuccess { api = it }.onFailure { message = "API 配置读取失败，请重新保存" }
         terms = archive.terms(); sessions = archive.sessions(); cloud = archive.cloudEnabled(); engine.setCloudAllowed(cloud)
@@ -200,6 +204,26 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun observeConnectivity(){
+        networkConnected=engine.hasInternetConnection()
+        val cm=getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val cb=object:android.net.ConnectivityManager.NetworkCallback(){
+            private fun refresh(){runOnUiThread{
+                if(!isDestroyed)networkConnected=engine.hasInternetConnection()
+            }}
+            override fun onAvailable(network:android.net.Network)=refresh()
+            override fun onLost(network:android.net.Network)=refresh()
+            override fun onCapabilitiesChanged(network:android.net.Network,capabilities:android.net.NetworkCapabilities)=refresh()
+        }
+        runCatching{cm.registerDefaultNetworkCallback(cb)}.onSuccess{
+            connectivityManager=cm;connectivityCallback=cb
+        }
+    }
+    override fun onResume(){
+        super.onResume()
+        if(::engine.isInitialized)networkConnected=engine.hasInternetConnection()
+    }
+    private fun summaryBlocker()=summaryAvailability(cloud,api.key.isNotBlank(),networkConnected)
     private fun changeMode(online:Boolean){
         if(cloud==online)return
         cloud=online;archive.setCloud(online);engine.setCloudAllowed(online)
@@ -227,7 +251,7 @@ class MainActivity : ComponentActivity() {
     }
     @Composable private fun ModeIndicator(){
         var expanded by remember{mutableStateOf(false)}
-        val color=if(cloud)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        val color=if(cloud&&networkConnected)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
         Box{
             TextButton(onClick={expanded=true},contentPadding=PaddingValues(horizontal=8.dp)){
                 Canvas(Modifier.size(15.dp)){
@@ -242,7 +266,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 Spacer(Modifier.width(5.dp))
-                Text(if(cloud)"联网" else "本地",color=color,fontSize=13.sp,fontWeight=FontWeight.Medium)
+                Text(if(cloud&&networkConnected)"联网" else if(cloud)"离线" else "本地",color=color,fontSize=13.sp,fontWeight=FontWeight.Medium)
             }
             DropdownMenu(expanded=expanded,onDismissRequest={expanded=false}){
                 DropdownMenuItem(text={Text("纯本地模式")},trailingIcon={if(!cloud)Text("✓",color=color)},onClick={changeMode(false);expanded=false})
@@ -606,9 +630,9 @@ class MainActivity : ComponentActivity() {
                     TextButton(onClick={viewed=session.time;navigate("detail")}){Text("查看会话纪要")}
                 }else if(!recording&&!finishing&&pending==0&&summarySpeech(session.items).isNotEmpty()){
                     Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
-                        Text(summaryErrors[session.time]?:if(!cloud||api.key.isBlank())"纪要需要联网及 API" else "尚未生成纪要",
+                        Text(summaryBlocker()?:summaryErrors[session.time]?:"待 AI 整理",
                             modifier=Modifier.weight(1f).padding(start=8.dp),fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                        TextButton(onClick={summarize(session)},enabled=summaryBusy==null){Text(if(summaryErrors.containsKey(session.time))"重试" else "生成纪要")}
+                        TextButton(onClick={summarize(session)},enabled=summaryBusy==null&&summaryBlocker()==null){Text("AI 整理")}
                     }
                 }
             }
@@ -937,12 +961,13 @@ class MainActivity : ComponentActivity() {
         }
         (if(lang=="ru"||lang.contains("ru+"))russianNetwork else liveNetwork).execute {
             val snapshot=currentContextForWorker(id,pos)
-            val analysis=if(online&&config.key.isNotBlank())runCatching{engine.analyze(config,raw,snapshot.first,snapshot.second,target,!typedInput,lang)} else null
+            val analysis=if(online&&config.key.isNotBlank()&&engine.hasInternetConnection())runCatching{engine.analyze(config,raw,snapshot.first,snapshot.second,target,!typedInput,lang)} else null
             val a=analysis?.getOrNull()
             val final=if(a!=null)base.copy(corrected=raw,translated=a.translated,scene=a.scene)
             else {
                 val translated=runCatching{local.get(15,java.util.concurrent.TimeUnit.SECONDS)}.getOrNull().orEmpty()
                 base.copy(translated=translated,error=when{
+                    translated.isBlank()&&!engine.hasInternetConnection()->"原文已保存 · 联网后可整理"
                     translated.isBlank()->"翻译不可用，请检查网络或离线语言包"
                     online&&config.key.isNotBlank()&&cloud->"网络翻译不可用 · 本地译文"
                     else->""
@@ -985,20 +1010,24 @@ class MainActivity : ComponentActivity() {
         CaptureService.stopRequested=null; stopService(android.content.Intent(this,CaptureService::class.java))
         val s=current?.takeIf{it.time==id}?:return
         saveCurrent()
-        if(summarySpeech(s.items).isNotEmpty()&&online&&config.key.isNotBlank()) summarize(s,config)
+        if(needsSessionSummary(s)&&online&&config.key.isNotBlank()&&engine.hasInternetConnection()) summarize(s,config)
     }
     private fun summarize(s:Session,config:ApiConfig=api) {
         if(summaryBusy!=null)return
         if(current?.time==s.time&&(recording||finishing||pending>0))return
         if(summarySpeech(s.items).isEmpty()){message="没有可供总结的文字记录";return}
-        if(!cloud||config.key.isBlank()){summaryErrors=summaryErrors+(s.time to "纪要需要启用云端并配置 API");return}
+        networkConnected=engine.hasInternetConnection()
+        summaryAvailability(cloud,config.key.isNotBlank(),networkConnected)?.let{
+            summaryErrors=summaryErrors+(s.time to it);return
+        }
         summaryErrors=summaryErrors-s.time
         summaryBusy=s.time
         network.execute {
             val result=runCatching{engine.summarize(config,s.items)}
             runOnUiThread {
+                networkConnected=engine.hasInternetConnection()
                 result.onSuccess{v->sessionFor(s.time)?.takeIf{it.items==s.items}?.let{latest->val updated=latest.copy(summary=v);persist(updated);if(current?.time==s.time)current=updated}}
-                    .onFailure{summaryErrors=summaryErrors+(s.time to "纪要生成失败，请重试")}
+                    .onFailure{summaryErrors=summaryErrors+(s.time to (summaryBlocker()?:"纪要生成失败，记录已保存，可重试"))}
                 summaryBusy=null
             }
         }
@@ -1083,7 +1112,13 @@ class MainActivity : ComponentActivity() {
                 .semantics{if(enabled)customActions=listOf(CustomAccessibilityAction(if(confirm)"确认删除记录" else "删除记录"){onDelete();true})}
                 .clickable(onClick=onTap).padding(horizontal=16.dp,vertical=15.dp),verticalAlignment=Alignment.CenterVertically){
                 Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(5.dp)){
-                    Text(timeLabel(session.time),fontSize=12.sp,color=scheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                        Text(timeLabel(session.time),fontSize=12.sp,color=scheme.onSurfaceVariant)
+                        if(needsSessionSummary(session)){
+                            Spacer(Modifier.weight(1f))
+                            Text(if(summaryBusy==session.time)"整理中…" else "待整理",fontSize=11.sp,color=scheme.onSurfaceVariant)
+                        }
+                    }
                     Text(session.summary.ifBlank{session.items.firstOrNull()?.translated?.ifBlank{session.items.first().raw}.orEmpty()}.ifBlank{"${session.items.size} 段语音"},fontSize=15.sp,color=scheme.onSurface,fontWeight=FontWeight.Medium,maxLines=2,overflow=TextOverflow.Ellipsis)
                 }
                 Text("›",fontSize=24.sp,color=scheme.onSurfaceVariant,modifier=Modifier.padding(start=12.dp))
@@ -1096,7 +1131,10 @@ class MainActivity : ComponentActivity() {
         Text(java.text.SimpleDateFormat("yyyy年 M月 d日 HH:mm",Locale.CHINA).format(java.util.Date(s.time)),fontSize=20.sp,fontWeight=FontWeight.SemiBold)
         Panel {
             Text("会话纪要",fontSize=18.sp,fontWeight=FontWeight.SemiBold)
-            if(s.summary.isBlank())Text(if(summaryBusy==s.time)"正在整理办理经过与具体信息…" else "尚未生成纪要",color=MaterialTheme.colorScheme.onSurfaceVariant,fontSize=14.sp)
+            if(s.summary.isBlank()){
+                Text(if(summaryBusy==s.time)"正在整理办理经过与具体信息…" else summaryBlocker()?:"记录已保存，可进行 AI 整理",color=MaterialTheme.colorScheme.onSurfaceVariant,fontSize=14.sp)
+                if(needsSessionSummary(s))Text("即使录音时没有网络，也可根据已保存的原文生成纪要。",fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             else SelectionContainer{
                 Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
                     s.summary.lineSequence().filter{it.isNotBlank()}.forEach{line->
@@ -1108,9 +1146,9 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-            summaryErrors[s.time]?.let{Text(it,fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+            if(summaryBlocker()==null)summaryErrors[s.time]?.let{Text(it,fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)}
             Row(verticalAlignment=Alignment.CenterVertically){
-                Button(onClick={summarize(s)},enabled=summaryBusy==null&&current?.takeIf{recording||finishing||pending>0}?.time!=s.time&&summarySpeech(s.items).isNotEmpty(),shape=corner){Text(if(summaryBusy==s.time)"整理中…" else if(s.summary.isBlank())"生成纪要" else "重新生成")}
+                Button(onClick={summarize(s)},enabled=summaryBusy==null&&summaryBlocker()==null&&current?.takeIf{recording||finishing||pending>0}?.time!=s.time&&summarySpeech(s.items).isNotEmpty(),shape=corner){Text(if(summaryBusy==s.time)"整理中…" else if(s.summary.isBlank())"AI 整理" else "重新整理")}
                 if(s.summary.isNotBlank())TextButton(onClick={copyText(s.summary)}){Text("复制")}
             }
             var confirm by remember {mutableStateOf(false)}
@@ -1231,7 +1269,7 @@ class MainActivity : ComponentActivity() {
                 Text("启用云端语义增强",modifier=Modifier.weight(1f))
                 Switch(checked=cloud,onCheckedChange={changeMode(it)})
             }
-            Text("云端增强将发送输入文字、近期会话上下文及确认术语。关闭后仅本地处理。",fontSize=12.sp)
+            Text("云端增强将发送输入文字、近期会话上下文及确认术语。AI 整理会发送选定会话的文字记录。关闭后仅本地处理，历史记录仍可在以后联网时整理。",fontSize=12.sp)
             OutlinedTextField(edit.key,{edit=edit.copy(key=it)},label={Text("API Key")},modifier=Modifier.fillMaxWidth(),singleLine=true,
                 visualTransformation=if(show)VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon={TextButton(onClick={show=!show}){Text(if(show)"隐藏" else "显示")}})
@@ -1255,7 +1293,7 @@ class MainActivity : ComponentActivity() {
                 }
             },enabled=!downloading,shape=corner,modifier=Modifier.fillMaxWidth()){Text(if(downloading)"下载中…" else "下载 / 检查离线翻译模型")}
         }
-        Panel {Text("版本 0.6.9");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
+        Panel {Text("版本 0.6.10");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
     }
     private fun speak(text:String,language:String="") {
         if(text.isBlank())return
@@ -1272,5 +1310,9 @@ class MainActivity : ComponentActivity() {
         }
         t.speak(text,TextToSpeech.QUEUE_ADD,null,System.nanoTime().toString())
     }
-    override fun onDestroy(){if(isFinishing)stopCapture();super.onDestroy()}
+    override fun onDestroy(){
+        connectivityCallback?.let{cb->runCatching{connectivityManager?.unregisterNetworkCallback(cb)}}
+        connectivityCallback=null;connectivityManager=null
+        if(isFinishing)stopCapture();super.onDestroy()
+    }
 }

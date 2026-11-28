@@ -317,3 +317,15 @@ internal fun summaryChunks(items:List<Segment>,maxChars:Int=18000,maxEntries:Int
     if(chunk.isNotEmpty())out.add(chunk)
     return out
 }
+
+/** Readiness is derived from saved transcript, not from a transient request or error. */
+internal fun needsSessionSummary(session:Session):Boolean =
+    session.summary.isBlank()&&summarySpeech(session.items).any{
+        it.raw.isNotBlank()||(it.corrected.isNotBlank()&&it.corrected!="识别未完成")||it.translated.isNotBlank()
+    }
+internal fun summaryAvailability(cloud:Boolean,hasKey:Boolean,connected:Boolean):String? = when{
+    !cloud->"纯本地模式 · 联网后可整理"
+    !connected->"已本地保存 · 联网后可整理"
+    !hasKey->"配置 API 后可整理"
+    else->null
+}

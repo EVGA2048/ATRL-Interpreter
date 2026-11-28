@@ -205,4 +205,15 @@ class PoliciesTest {
         assertTrue(summaryChunks(listOf(c)).isEmpty())
         assertEquals(listOf(b,a,d),summaryChunks(listOf(d,a,b),maxChars=1).flatten())
     }
+    @Test fun offlineTranscriptsRemainEligibleForAiSummary(){
+        val offline=Session("机场",listOf(Segment("Где багаж?",error="原文已保存",language="ru")))
+        assertTrue(needsSessionSummary(offline))
+        assertTrue(needsSessionSummary(offline.copy(items=offline.items.map{it.copy(translated="行李在哪里？")})))
+        assertFalse(needsSessionSummary(offline.copy(summary="询问行李位置")))
+        assertFalse(needsSessionSummary(Session("无语音",listOf(Segment("",corrected="识别未完成")))))
+        assertFalse(needsSessionSummary(Session("环境声",listOf(Segment("[音乐]",soundEvent="音乐")))))
+        assertNotNull(summaryAvailability(true,true,false))
+        assertNotNull(summaryAvailability(false,true,true))
+        assertNull(summaryAvailability(true,true,true))
+    }
 }

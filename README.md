@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.6.9-2859CC?style=flat-square" alt="Version 0.6.9">
+  <img src="https://img.shields.io/badge/version-0.6.10-2859CC?style=flat-square" alt="Version 0.6.10">
   <img src="https://img.shields.io/badge/Android-8.0%2B-536275?style=flat-square" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/ABI-ARM64-82996a?style=flat-square" alt="ARM64">
   <img src="https://img.shields.io/badge/status-development-74747B?style=flat-square" alt="In development">
@@ -103,10 +103,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## 04 / Development
 
-当前版本 **0.6.9**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
+当前版本 **0.6.10**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
 
 | 版本 | 主要变化 |
 |:--|:--|
+| 0.6.10 | 离线会话保留、联网后 AI 整理与待整理状态 |
 | 0.6.9 | 双语声音事件标签、分段长会话详细纪要 |
 | 0.6.8 | 传译页快速文字输入、键入字幕独立配色 |
 | 0.6.7 | 面对面译文反转、语音分段及中文候选选择优化 |
