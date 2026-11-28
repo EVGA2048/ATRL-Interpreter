@@ -216,4 +216,12 @@ class PoliciesTest {
         assertNotNull(summaryAvailability(false,true,true))
         assertNull(summaryAvailability(true,true,true))
     }
+    @Test fun networkNotificationsOnlyDescribeTransitions(){
+        assertNull(networkTransitionNotice(null,true))
+        assertNull(networkTransitionNotice(true,true))
+        assertNull(networkTransitionNotice(false,false))
+        assertEquals("网络已断开，继续本地处理",networkTransitionNotice(null,false))
+        assertEquals("网络已断开，继续本地处理",networkTransitionNotice(true,false))
+        assertEquals("网络已恢复",networkTransitionNotice(false,true))
+    }
 }

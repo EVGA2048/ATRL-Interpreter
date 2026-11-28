@@ -329,3 +329,8 @@ internal fun summaryAvailability(cloud:Boolean,hasKey:Boolean,connected:Boolean)
     !hasKey->"配置 API 后可整理"
     else->null
 }
+
+/** Notify once per settled transition; launching online is silent. */
+internal fun networkTransitionNotice(previous:Boolean?,connected:Boolean):String? =
+    if(previous==connected||(previous==null&&connected))null
+    else if(connected)"网络已恢复" else "网络已断开，继续本地处理"

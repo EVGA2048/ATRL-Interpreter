@@ -33,6 +33,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import kotlinx.coroutines.delay
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
@@ -168,6 +170,20 @@ class MainActivity : ComponentActivity() {
                     BackHandler(page !in listOf("text","live","notes","terms")){navigate(if(page=="detail")"notes" else previousPage)}
                     BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().imePadding()){
                         val wide=maxWidth>=650.dp
+                        var settledNetwork by remember{mutableStateOf<Boolean?>(null)}
+                        var networkNotice by remember{mutableStateOf<String?>(null)}
+                        LaunchedEffect(cloud,networkConnected){
+                            if(!cloud){settledNetwork=null;networkNotice=null}
+                            else{
+                                delay(1200)
+                                val previous=settledNetwork
+                                settledNetwork=networkConnected
+                                networkTransitionNotice(previous,networkConnected)?.let{networkNotice=it}
+                            }
+                        }
+                        LaunchedEffect(networkNotice){
+                            if(networkNotice!=null){delay(3400);networkNotice=null}
+                        }
                         Column(Modifier.align(Alignment.TopCenter).widthIn(max=920.dp).fillMaxSize()){
                             Row(Modifier.fillMaxWidth().padding(start=20.dp,end=12.dp,top=5.dp,bottom=8.dp).heightIn(min=52.dp),verticalAlignment=Alignment.CenterVertically){
                                 if(page=="settings"||page=="detail") TextButton(onClick={navigate(if(page=="detail")"notes" else previousPage)},contentPadding=PaddingValues(end=12.dp)){Text("‹ 返回",fontSize=16.sp)}
@@ -196,6 +212,18 @@ class MainActivity : ComponentActivity() {
                                             Text(label,color=color,fontSize=11.sp,fontWeight=if(activeTab)FontWeight.SemiBold else FontWeight.Normal)
                                         }
                                     }
+                                }
+                            }
+                        }
+                        AnimatedVisibility(visible=networkNotice!=null,
+                            modifier=Modifier.align(Alignment.BottomCenter).padding(start=16.dp,end=16.dp,bottom=if(page in listOf("settings","detail"))14.dp else 76.dp),
+                            enter=fadeIn(tween(160)),exit=fadeOut(tween(180))){
+                            Surface(shape=RoundedCornerShape(12.dp),color=scheme.onSurface,
+                                shadowElevation=4.dp){
+                                Row(Modifier.padding(horizontal=15.dp,vertical=10.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                                    Text(if(settledNetwork==true)"✓" else "!",fontSize=16.sp,fontWeight=FontWeight.Bold,
+                                        color=if(settledNetwork==true)Color(0xFF8DD9BE) else Color(0xFFFFB568))
+                                    Text(networkNotice.orEmpty(),fontSize=13.sp,color=scheme.surface)
                                 }
                             }
                         }
@@ -251,7 +279,11 @@ class MainActivity : ComponentActivity() {
     }
     @Composable private fun ModeIndicator(){
         var expanded by remember{mutableStateOf(false)}
-        val color=if(cloud&&networkConnected)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        val color=when{
+            cloud&&!networkConnected->if(isSystemInDarkTheme())Color(0xFFFFB568) else Color(0xFFB85C08)
+            cloud->MaterialTheme.colorScheme.primary
+            else->MaterialTheme.colorScheme.onSurfaceVariant
+        }
         Box{
             TextButton(onClick={expanded=true},contentPadding=PaddingValues(horizontal=8.dp)){
                 Canvas(Modifier.size(15.dp)){
@@ -266,7 +298,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 Spacer(Modifier.width(5.dp))
-                Text(if(cloud&&networkConnected)"联网" else if(cloud)"离线" else "本地",color=color,fontSize=13.sp,fontWeight=FontWeight.Medium)
+                Text(if(cloud&&networkConnected)"联网" else if(cloud)"离线 !" else "本地",color=color,fontSize=13.sp,fontWeight=FontWeight.Medium)
             }
             DropdownMenu(expanded=expanded,onDismissRequest={expanded=false}){
                 DropdownMenuItem(text={Text("纯本地模式")},trailingIcon={if(!cloud)Text("✓",color=color)},onClick={changeMode(false);expanded=false})
@@ -1259,48 +1291,110 @@ class MainActivity : ComponentActivity() {
             if(confirmDelete&&old!=null)AlertDialog(onDismissRequest={confirmDelete=false},title={Text("删除此术语？")},confirmButton={TextButton(onClick={terms=terms.filterNot{it==old};archive.saveTerms(terms);close()}){Text("删除")}},dismissButton={TextButton(onClick={confirmDelete=false}){Text("取消")}})
         }
     }
-    @Composable private fun SettingsPage() {
-
+    @Composable private fun SettingsHeading(text:String){
+        Text(text,fontSize=13.sp,fontWeight=FontWeight.Medium,
+            color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(start=5.dp,top=5.dp))
+    }
+    @Composable private fun SettingsNote(text:String){
+        Text(text,fontSize=12.sp,lineHeight=18.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    @Composable private fun SettingsPage(){
+        val scheme=MaterialTheme.colorScheme
         var edit by remember{mutableStateOf(api)}
         var show by remember{mutableStateOf(false)}
-        Panel {
-            Text("DeepSeek Flash",fontSize=21.sp)
-            Row(verticalAlignment=Alignment.CenterVertically){
-                Text("启用云端语义增强",modifier=Modifier.weight(1f))
+        val focus=LocalFocusManager.current
+        SettingsHeading("网络服务")
+        Panel{
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)){
+                    Text("网络模式",fontSize=16.sp,fontWeight=FontWeight.Medium)
+                    SettingsNote("联网翻译、会话整理及术语提取")
+                }
                 Switch(checked=cloud,onCheckedChange={changeMode(it)})
             }
-            Text("云端增强将发送输入文字、近期会话上下文及确认术语。AI 整理会发送选定会话的文字记录。关闭后仅本地处理，历史记录仍可在以后联网时整理。",fontSize=12.sp)
+            HorizontalDivider(color=scheme.outline.copy(alpha=.45f))
+            SettingsNote("断网时继续识别，已下载的语言包仍可使用。")
             OutlinedTextField(edit.key,{edit=edit.copy(key=it)},label={Text("API Key")},modifier=Modifier.fillMaxWidth(),singleLine=true,
+                textStyle=TextStyle(fontSize=14.sp),keyboardOptions=KeyboardOptions(autoCorrectEnabled=false),
                 visualTransformation=if(show)VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon={TextButton(onClick={show=!show}){Text(if(show)"隐藏" else "显示")}})
-            OutlinedTextField(edit.endpoint,{edit=edit.copy(endpoint=it)},label={Text("Base URL")},modifier=Modifier.fillMaxWidth(),singleLine=true)
-            OutlinedTextField(edit.model,{edit=edit.copy(model=it)},label={Text("Model")},modifier=Modifier.fillMaxWidth(),singleLine=true)
+                trailingIcon={TextButton(onClick={show=!show}){Text(if(show)"隐藏" else "显示",fontSize=12.sp)}})
+            OutlinedTextField(edit.endpoint,{edit=edit.copy(endpoint=it)},label={Text("服务地址")},modifier=Modifier.fillMaxWidth(),singleLine=true,
+                textStyle=TextStyle(fontSize=14.sp),keyboardOptions=KeyboardOptions(autoCorrectEnabled=false))
+            OutlinedTextField(edit.model,{edit=edit.copy(model=it)},label={Text("模型")},modifier=Modifier.fillMaxWidth(),singleLine=true,
+                textStyle=TextStyle(fontSize=14.sp),keyboardOptions=KeyboardOptions(autoCorrectEnabled=false))
             Button(onClick={
                 val next=ApiConfig(edit.key.trim(),edit.endpoint.trim().trimEnd('/'),edit.model.trim())
-                if(!next.endpoint.startsWith("https://")||next.model.isBlank()){message="需要有效 HTTPS 地址和模型名";return@Button}
-                runCatching{settings.save(next)}.onSuccess{api=next;engine.resetCloud();message="已加密保存"}.onFailure{message="保存失败"}
+                if(!next.endpoint.startsWith("https://")||next.model.isBlank()){message="请填写 HTTPS 服务地址和模型名称";return@Button}
+                runCatching{settings.save(next)}.onSuccess{api=next;edit=next;engine.resetCloud();focus.clearFocus();message="配置已保存"}.onFailure{message="未能保存配置"}
             },modifier=Modifier.fillMaxWidth(),shape=corner){Text("保存配置")}
         }
-        Panel {
-            Text("离线模型",fontSize=21.sp)
-            Text("中文、英语和俄语识别已内置。离线翻译需先下载语言包。",fontSize=12.sp)
-            if(modelStatus.isNotBlank())Text(modelStatus,fontSize=12.sp)
-            Button(onClick={
-                downloading=true;modelStatus="正在准备离线模型…"
-                modelDownload.execute {
+        Text("网络模式会将文字及相关上下文发送至所配置的服务。纯本地模式不发送会话内容。",
+            fontSize=12.sp,lineHeight=18.sp,color=scheme.onSurfaceVariant,modifier=Modifier.padding(horizontal=5.dp))
+        SettingsHeading("离线资源")
+        Panel{
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                Text("语音识别",fontSize=15.sp,modifier=Modifier.weight(1f))
+                Text("已内置",fontSize=13.sp,color=scheme.onSurfaceVariant)
+            }
+            SettingsNote("中文、英语、俄语")
+            HorizontalDivider(color=scheme.outline.copy(alpha=.45f))
+            Text("翻译语言包",fontSize=15.sp)
+            SettingsNote("出发前下载，断网时仍可翻译。")
+            if(modelStatus.isNotBlank())SettingsNote(modelStatus)
+            OutlinedButton(onClick={
+                downloading=true;modelStatus="正在检查语言包…"
+                modelDownload.execute{
                     val r=runCatching{engine.prepareOffline()}
-                    runOnUiThread{downloading=false;modelStatus=if(r.isSuccess)"离线翻译模型就绪" else "下载失败：${r.exceptionOrNull()?.message}"}
+                    runOnUiThread{downloading=false;modelStatus=if(r.isSuccess)"语言包已就绪" else "下载失败，请检查网络后重试"}
                 }
-            },enabled=!downloading,shape=corner,modifier=Modifier.fillMaxWidth()){Text(if(downloading)"下载中…" else "下载 / 检查离线翻译模型")}
+            },enabled=!downloading,shape=corner,modifier=Modifier.fillMaxWidth()){
+                if(downloading){CircularProgressIndicator(Modifier.size(15.dp),strokeWidth=2.dp);Spacer(Modifier.width(8.dp))}
+                Text(if(downloading)"下载中…" else "下载或检查语言包")
+            }
         }
-        Panel {Text("版本 0.6.10");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
+        SettingsHeading("数据与隐私")
+        Panel{
+            Text("会话记录",fontSize=15.sp,fontWeight=FontWeight.Medium)
+            SettingsNote("在本机保存会话文字和词库，不保留录音。")
+            HorizontalDivider(color=scheme.outline.copy(alpha=.45f))
+            Text("API Key",fontSize=15.sp,fontWeight=FontWeight.Medium)
+            SettingsNote("通过 Android Keystore 加密保存。")
+        }
+        SettingsHeading("关于")
+        Panel{
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                Text("Interpreter",fontSize=17.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.weight(1f))
+                Text("0.6.11",fontSize=13.sp,color=scheme.onSurfaceVariant)
+            }
+            HorizontalDivider(color=scheme.outline.copy(alpha=.45f))
+            Row(Modifier.fillMaxWidth().clickable{
+                runCatching{startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse("https://github.com/EVGA2048/ATRL-Interpreter")))}
+                    .onFailure{message="无法打开仓库地址"}
+            }.padding(vertical=4.dp),verticalAlignment=Alignment.CenterVertically){
+                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)){
+                    Text("GitHub",fontSize=15.sp)
+                    Text("EVGA2048/ATRL-Interpreter",fontSize=12.sp,color=scheme.onSurfaceVariant)
+                }
+                Text("↗",fontSize=18.sp,color=scheme.onSurfaceVariant)
+            }
+        }
+        Column(Modifier.fillMaxWidth().padding(top=8.dp,bottom=12.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(5.dp)){
+            Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(5.dp)){
+                Text("ASTROLAB",fontSize=16.sp,letterSpacing=1.7.sp,fontWeight=FontWeight.Medium,color=scheme.onSurface)
+                Canvas(Modifier.size(9.dp)){drawPath(Path().apply{moveTo(size.width,0f);lineTo(size.width,size.height);lineTo(0f,size.height);close()},cobalt)}
+            }
+            Text("Developed by node0",fontSize=12.sp,color=scheme.onSurfaceVariant)
+            Text("© 2026 ASTROLAB. All rights reserved.",fontSize=11.sp,color=scheme.onSurfaceVariant)
+            Text("第三方组件适用各自的许可证。",fontSize=10.sp,color=scheme.onSurfaceVariant)
+        }
     }
     private fun speak(text:String,language:String="") {
         if(text.isBlank())return
         if(!ttsReady){message="系统语音合成不可用";return}
         val t=tts?:return
         val locale=when(language.ifBlank{engine.detectText(text)}){"zh"->Locale.SIMPLIFIED_CHINESE;"en"->Locale.US;else->Locale("ru","RU")}
-        if(!cloud){
+        if(!cloud||!engine.hasInternetConnection()){
             val voice=t.voices?.filter{!it.isNetworkConnectionRequired&&it.locale.language==locale.language}
                 ?.maxByOrNull{(if(it.locale==locale)100000 else 0)+it.quality}
             if(voice==null||t.setVoice(voice)!=TextToSpeech.SUCCESS){message="请安装本地语音包";return}

@@ -1,5 +1,10 @@
 # Development log
 
+## 0.6.11
+
+- Reorganize settings and simplify copy; add the ASTROLAB copyright, developer credit and repository link.
+- Show an orange offline indicator in network mode and nonmodal, debounced bottom notifications for disconnect/reconnect.
+
 ## 0.6.10
 
 - Detect disconnected networks and avoid unnecessary cloud requests while preserving local transcripts.
