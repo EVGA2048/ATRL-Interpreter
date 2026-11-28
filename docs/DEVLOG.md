@@ -1,5 +1,11 @@
 # Development log
 
+## 0.6.7
+
+- Add a live interpretation header toggle to rotate translated captions 180 degrees without altering source text or archives.
+- Increase ordinary VAD silence endpoint to 550 ms and maximum speech duration to 8 s; experimental mixed mode retains its previous settings.
+- Reject severely incomplete Chinese alternative hypotheses and retain Chinese script in Russian mixed transcripts.
+
 ## 0.6.6
 
 - Prefer SenseVoice for Chinese speech and add a Chinese-priority mode.

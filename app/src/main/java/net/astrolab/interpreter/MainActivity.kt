@@ -40,6 +40,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -109,6 +110,7 @@ class MainActivity : ComponentActivity() {
     private var russianStreaming by mutableStateOf(false)
     private var mixedRecognition by mutableStateOf(false)
     private var chineseRecognition by mutableStateOf(false)
+    private var invertedTranslation by mutableStateOf(false)
     private val streamingWorker=Executors.newSingleThreadExecutor()
     private val editWorker=Executors.newFixedThreadPool(2)
     private data class SentenceEdit(val session:Long,val index:Int,val source:Boolean,val before:String,val selection:TextRange)
@@ -160,6 +162,7 @@ class MainActivity : ComponentActivity() {
                             Row(Modifier.fillMaxWidth().padding(start=20.dp,end=12.dp,top=5.dp,bottom=8.dp).heightIn(min=52.dp),verticalAlignment=Alignment.CenterVertically){
                                 if(page=="settings"||page=="detail") TextButton(onClick={navigate(if(page=="detail")"notes" else previousPage)},contentPadding=PaddingValues(end=12.dp)){Text("‹ 返回",fontSize=16.sp)}
                                 Text(when(page){"text"->"翻译";"live"->"传译";"notes"->"记录";"terms"->"词库";"settings"->"设置";else->"会话"},fontSize=if(page=="detail"||page=="settings")23.sp else 32.sp,letterSpacing=(-.8).sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
+                                if(page=="live")TranslationFlipToggle()
                                 if(page=="text"||page=="live")ModeIndicator()
                                 if(page!="settings"&&page!="detail")IconButton(onClick={previousPage=page;navigate("settings")}){NavGlyph("settings",scheme.onSurface,Modifier.size(24.dp))}
                             }
@@ -195,6 +198,26 @@ class MainActivity : ComponentActivity() {
         if(cloud==online)return
         cloud=online;archive.setCloud(online);engine.setCloudAllowed(online)
         if(!online)tts?.stop()
+    }
+    @Composable private fun TranslationFlipToggle(){
+        val scheme=MaterialTheme.colorScheme
+        val color=if(invertedTranslation)scheme.primary else scheme.onSurfaceVariant
+        IconToggleButton(checked=invertedTranslation,onCheckedChange={invertedTranslation=it},
+            modifier=Modifier.semantics{contentDescription="译文反转 180 度"}){
+            Box(Modifier.size(32.dp).clip(RoundedCornerShape(8.dp))
+                .background(if(invertedTranslation)scheme.primary.copy(alpha=.12f) else Color.Transparent),
+                contentAlignment=Alignment.Center){
+                Canvas(Modifier.size(23.dp)){
+                    val w=size.width;val h=size.height;val stroke=1.7.dp.toPx()
+                    val p=Path().apply{moveTo(w*.22f,h*.31f);lineTo(w*.76f,h*.31f);lineTo(w*.61f,h*.16f)}
+                    drawPath(p,color,style=Stroke(stroke,cap=StrokeCap.Round,join=androidx.compose.ui.graphics.StrokeJoin.Round))
+                    val q=Path().apply{moveTo(w*.78f,h*.69f);lineTo(w*.24f,h*.69f);lineTo(w*.39f,h*.84f)}
+                    drawPath(q,color,style=Stroke(stroke,cap=StrokeCap.Round,join=androidx.compose.ui.graphics.StrokeJoin.Round))
+                    drawLine(color,Offset(w*.76f,h*.31f),Offset(w*.76f,h*.49f),stroke,StrokeCap.Round)
+                    drawLine(color,Offset(w*.24f,h*.69f),Offset(w*.24f,h*.51f),stroke,StrokeCap.Round)
+                }
+            }
+        }
     }
     @Composable private fun ModeIndicator(){
         var expanded by remember{mutableStateOf(false)}
@@ -369,7 +392,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun timeLabel(time:Long)=java.text.SimpleDateFormat("HH:mm",Locale.getDefault()).format(java.util.Date(time))
     private fun newGroup(items:List<Segment>,index:Int)=startsNewGroup(items.getOrNull(index-1)?.time,items[index].startTime)
-    @Composable private fun EditableCaption(value:String,before:String?,color:Color,fontSize:Int,lineHeight:Int,source:Boolean,onEdit:(TextRange)->Unit){
+    @Composable private fun EditableCaption(value:String,before:String?,color:Color,fontSize:Int,lineHeight:Int,source:Boolean,rotation:Float=0f,onEdit:(TextRange)->Unit){
         val scheme=MaterialTheme.colorScheme
         var layout by remember(value){mutableStateOf<TextLayoutResult?>(null)}
         val accent=if(source)scheme.primary else if(isSystemInDarkTheme())Color(0xFFD3E0FF) else Color(0xFF123A91)
@@ -383,7 +406,7 @@ class MainActivity : ComponentActivity() {
         }
         Text(annotated,fontSize=fontSize.sp,lineHeight=lineHeight.sp,color=color,
             fontWeight=if(source)FontWeight.Normal else FontWeight.Medium,
-            onTextLayout={layout=it},modifier=Modifier.fillMaxWidth().pointerInput(value){
+            onTextLayout={layout=it},modifier=Modifier.fillMaxWidth().rotate(rotation).pointerInput(value,rotation){
                 detectTapGestures(onTap={point->
                     val l=layout?:return@detectTapGestures
                     if(value.isNotEmpty()){
@@ -435,7 +458,7 @@ class MainActivity : ComponentActivity() {
             runOnUiThread{replaceSentence(request.session,request.index,revision,updated)}
         }
     }
-    @Composable private fun CaptionPair(s:Segment,sessionId:Long,index:Int){
+    @Composable private fun CaptionPair(s:Segment,sessionId:Long,index:Int,flipTranslation:Boolean=false){
         val scheme=MaterialTheme.colorScheme
         val done=s.translated.isNotBlank()
         val rawColor by animateColorAsState(if(done)scheme.onSurface else scheme.onSurfaceVariant,tween(220),label="caption color")
@@ -457,7 +480,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             AnimatedVisibility(visible=done,enter=fadeIn(tween(220))+expandVertically(tween(180),expandFrom=Alignment.Top)){
-                EditableCaption(s.translated,s.translationBeforeEdit,scheme.primary,20,29,false){range->
+                EditableCaption(s.translated,s.translationBeforeEdit,scheme.primary,20,29,false,rotation=if(flipTranslation)180f else 0f){range->
                     sentenceEdit=SentenceEdit(sessionId,index,false,s.translated,range)
                 }
             }
@@ -546,7 +569,7 @@ class MainActivity : ComponentActivity() {
                     itemsIndexed(items,key={i,_->i}){i,s->
                         if(newGroup(items,i))GroupTime(s)
                         if(s.soundEvent.isBlank()&&(i==0||newGroup(items,i)||items[i-1].language!=s.language))Text(languageName(s.language.ifBlank{engine.detectText(s.raw)}),fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(top=3.dp))
-                        CaptionPair(s,current!!.time,i)
+                        CaptionPair(s,current!!.time,i,flipTranslation=invertedTranslation)
                     }
                     item(key="tail"){
                         if(draft!=null&&draft.text.isNotBlank()){
@@ -618,8 +641,8 @@ class MainActivity : ComponentActivity() {
                 val input=AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION,16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,maxOf(min,6400))
                 mic=input;check(input.state==AudioRecord.STATE_INITIALIZED);input.startRecording()
                 val detector=Vad(assets,VadModelConfig(sileroVadModelConfig=SileroVadModelConfig(
-                    model="asr/silero_vad.onnx",threshold=0.5f,minSilenceDuration=0.38f,minSpeechDuration=0.25f,
-                    windowSize=512,maxSpeechDuration=5.0f),sampleRate=16000,numThreads=1,provider="cpu"))
+                    model="asr/silero_vad.onnx",threshold=0.5f,minSilenceDuration=if(useMixed)0.38f else 0.55f,minSpeechDuration=0.25f,
+                    windowSize=512,maxSpeechDuration=if(useMixed)5.0f else 8.0f),sampleRate=16000,numThreads=1,provider="cpu"))
                 vad=detector
                 val block=ShortArray(512)
                 val origin=System.currentTimeMillis()
@@ -1119,7 +1142,7 @@ class MainActivity : ComponentActivity() {
                 }
             },enabled=!downloading,shape=corner,modifier=Modifier.fillMaxWidth()){Text(if(downloading)"下载中…" else "下载 / 检查离线翻译模型")}
         }
-        Panel {Text("版本 0.6.6");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
+        Panel {Text("版本 0.6.7");Text("录音不保存；会话文字与术语在应用私有存储中。API Key 使用 Android Keystore 加密。",fontSize=12.sp)}
     }
     private fun speak(text:String,language:String="") {
         if(text.isBlank())return

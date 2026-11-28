@@ -160,4 +160,14 @@ class PoliciesTest {
         assertEquals(ru,chooseChineseCaption(ru,"语音识别",32000))
         assertEquals(Recognition("中文 test English","en+zh"),chooseChineseCaption(zh,"中文 test English",32000))
     }
+    @Test fun rejectsSeverelyIncompleteChineseCandidate(){
+        val complete=Recognition("今天我們學習鐵路信號","zh")
+        assertEquals(complete,chooseChineseCaption(complete,"嗯",48000))
+        assertEquals(Recognition("今天我们学习铁路信号","zh"),chooseChineseCaption(complete,"今天我们学习铁路信号",48000))
+        assertFalse(isIncompleteChineseCandidate("(".repeat(20),"你好",48000))
+    }
+    @Test fun retainsChineseInRussianAcousticTranscript(){
+        assertEquals("ru+zh",asrLanguage(Recognition("今天 изучаем сигналы","ru")))
+        assertEquals("ru",asrLanguage(Recognition("Система ETCS","ru")))
+    }
 }

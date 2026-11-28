@@ -162,7 +162,7 @@ internal class PreviewStabilizer {
     fun reset(){visible=null;candidate=null}
 }
 internal fun asrLanguage(recognition:Recognition):String =
-    if(recognition.language=="ru"&&"ru" in scriptLanguages(recognition.text))"ru"
+    if(recognition.language=="ru"&&"ru" in scriptLanguages(recognition.text)&&"zh" !in scriptLanguages(recognition.text))"ru"
     else mixedCode(recognition.text,recognition.language)
 
 internal fun validCloudTranslation(raw:String,translated:String):Boolean =
@@ -261,6 +261,15 @@ internal fun chooseChineseCaption(primary:Recognition,candidate:String,samples:I
     val scripts=scriptLanguages(candidate)
     if(!plausibleCaption(candidate,samples)||"zh" !in scripts||"ru" in scripts)return primary
     if(!forceChinese&&(primary.language!="zh"||"ru" in scriptLanguages(primary.text)))return primary
+    // A short fragment must not replace a substantially more complete, plausible decode.
+    if(isIncompleteChineseCandidate(primary.text,candidate,samples))return primary
     val normalized=normalizeSenseVoiceCase(candidate,primary.text)
     return Recognition(normalized,mixedCode(normalized,"zh"))
+}
+
+internal fun isIncompleteChineseCandidate(primary:String,candidate:String,samples:Int):Boolean{
+    if(!plausibleCaption(primary,samples))return false
+    val a=primary.count{it in '\u4e00'..'\u9fff'}
+    val b=candidate.count{it in '\u4e00'..'\u9fff'}
+    return a>=6&&b*2<a
 }

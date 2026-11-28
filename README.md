@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.6.6-2859CC?style=flat-square" alt="Version 0.6.6">
+  <img src="https://img.shields.io/badge/version-0.6.7-2859CC?style=flat-square" alt="Version 0.6.7">
   <img src="https://img.shields.io/badge/Android-8.0%2B-536275?style=flat-square" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/ABI-ARM64-82996a?style=flat-square" alt="ARM64">
   <img src="https://img.shields.io/badge/status-development-74747B?style=flat-square" alt="In development">
@@ -103,10 +103,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## 04 / Development
 
-当前版本 **0.6.6**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
+当前版本 **0.6.7**，开发测试设备为 Huawei P30 Pro（Android 10 / 8 GB）。
 
 | 版本 | 主要变化 |
 |:--|:--|
+| 0.6.7 | 面对面译文反转、语音分段及中文候选选择优化 |
 | 0.6.6 | 中文优先识别、异常符号拦截、实验模式隔离 |
 | 0.6.5 | 改进语言切换检测、实验性声音事件字幕、记录日期层级 |
 | 0.6.4 | SenseVoice 英文大小写处理 |
