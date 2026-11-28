@@ -1,5 +1,10 @@
 # Development log
 
+## 0.6.12
+
+- Adopt inset grouped settings rows, consistent typography and section footers.
+- Refine Chinese interface copy and retain project attribution.
+
 ## 0.6.11
 
 - Reorganize settings and simplify copy; add the ASTROLAB copyright, developer credit and repository link.
