@@ -1,5 +1,11 @@
 # Development log
 
+## 0.6.15
+
+- Capture or select an image, run local OCR for Chinese, English and Russian, and translate with local or cloud services.
+- Add reviewed photo text to a conversation or save it as a standalone record. Preserve source origin and OCR confidence in archives and AI summaries; do not retain photo originals in the archive.
+- Include a reproducible fetch step for pinned OCR models. Camera, OCR quality and concurrent microphone behavior require device validation.
+
 ## 0.6.14
 
 - Query account balance once at startup when cloud mode and network are available; defer the first check until connectivity returns if necessary. Share balance across screens and allow manual refresh.

@@ -20,3 +20,5 @@ app/src/main/assets/asr/*.onnx
 app/src/main/assets/asr/*-tokens.txt
 
 app/src/main/assets/asr/ced-labels.csv
+
+app/src/main/assets/ocr/*.traineddata

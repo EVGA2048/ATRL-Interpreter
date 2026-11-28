@@ -1,0 +1,7 @@
+Tesseract OCR and tess-two Android wrapper
+https://github.com/rmtheis/tess-two
+https://github.com/tesseract-ocr/tesseract
+OCR language data: https://github.com/tesseract-ocr/tessdata/tree/3.04.00
+Apache License, Version 2.0 (see Apache-2.0.txt).
+The Android AAR also contains native third-party image-processing libraries;
+refer to the upstream tess-two source and notices for their individual terms.

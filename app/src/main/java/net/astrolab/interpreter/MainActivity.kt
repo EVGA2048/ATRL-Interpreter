@@ -58,6 +58,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalFocusManager
@@ -99,6 +103,30 @@ class MainActivity : ComponentActivity() {
     private lateinit var settings: ApiSettings
     private var api by mutableStateOf(ApiConfig())
     private var cloud by mutableStateOf(true)
+    private val photoWorker=Executors.newSingleThreadExecutor()
+    private val photoOcr by lazy{PhotoOcr(applicationContext)}
+    private var photoDialog by mutableStateOf(false)
+    private var photoBusy by mutableStateOf(false)
+    private var photoError by mutableStateOf("")
+    private var photoSource by mutableStateOf("")
+    private var photoOriginal=""
+    private var photoResult by mutableStateOf<Segment?>(null)
+    private var photoBitmap by mutableStateOf<android.graphics.Bitmap?>(null)
+    private var photoConfidence by mutableIntStateOf(0)
+    private var photoLanguage by mutableStateOf("auto")
+    private var photoTarget by mutableStateOf("zh")
+    private var photoSessionId:Long?=null
+    private var photoTime=0L
+    private var cameraFile:java.io.File?=null
+    private val takePhoto=registerForActivityResult(ActivityResultContracts.TakePicture()){ok->
+        val file=cameraFile;cameraFile=null
+        if(ok&&file!=null&&file.length()>0L)recognizePhoto(androidx.core.content.FileProvider.getUriForFile(this,"net.astrolab.interpreter.photos",file),file)
+        else{file?.delete();photoDialog=true}
+    }
+    private val pickPhoto=registerForActivityResult(ActivityResultContracts.GetContent()){uri->
+        if(uri!=null)recognizePhoto(uri,null)
+    }
+
     private var balance by mutableStateOf<AccountBalance?>(null)
     private var balanceError by mutableStateOf("")
     private var balanceLoading by mutableStateOf(false)
@@ -165,6 +193,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        savedInstanceState?.getString("cameraFile")?.let{path->
+            val f=java.io.File(path)
+            if(f.parentFile==java.io.File(cacheDir,"camera")&&f.isFile){
+                cameraFile=f;photoDialog=true
+                photoSessionId=savedInstanceState.getLong("photoSessionId",0L).takeIf{it!=0L}
+                photoLanguage=savedInstanceState.getString("photoLanguage","auto")
+                photoTarget=savedInstanceState.getString("photoTarget","zh")
+            }
+        }
+        java.io.File(cacheDir,"camera").listFiles()?.filter{it!=cameraFile&&System.currentTimeMillis()-it.lastModified()>3600000L}?.forEach{it.delete()}
         enableEdgeToEdge(statusBarStyle=SystemBarStyle.auto(0xFFF5F5F7.toInt(),0xFF101113.toInt()),navigationBarStyle=SystemBarStyle.auto(0xFFFFFFFF.toInt(),0xFF1D1E21.toInt()))
         engine = Engine(applicationContext)
         observeConnectivity()
@@ -179,6 +217,7 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme=scheme,shapes=Shapes(small=corner,medium=corner,large=corner)){
                 Surface(Modifier.fillMaxSize(),color=scheme.background){
                     BalanceMonitor()
+                    if(photoDialog)PhotoPage()
                     if(balanceDialog)BalanceDetails()
                     sentenceEdit?.let{request->key(request){SentenceEditDialog(request)}}
                     BackHandler(page !in listOf("text","live","notes","terms")){navigate(if(page=="detail")"notes" else previousPage)}
@@ -406,6 +445,10 @@ class MainActivity : ComponentActivity() {
                     val p=Path().apply{moveTo(w*.50f,h*.23f);quadraticTo(w*.28f,h*.07f,w*.08f,h*.14f);lineTo(w*.08f,h*.80f);quadraticTo(w*.30f,h*.75f,w*.50f,h*.89f);quadraticTo(w*.70f,h*.75f,w*.92f,h*.80f);lineTo(w*.92f,h*.14f);quadraticTo(w*.72f,h*.07f,w*.50f,h*.23f);close()}
                     if(active)drawPath(p,color.copy(alpha=.13f));outline(p);line(.50f,.23f,.50f,.89f)
                 }
+                "camera"->{
+                    val p=Path().apply{moveTo(w*.12f,h*.23f);lineTo(w*.32f,h*.23f);lineTo(w*.40f,h*.10f);lineTo(w*.65f,h*.10f);lineTo(w*.73f,h*.23f);lineTo(w*.88f,h*.23f);quadraticTo(w*.96f,h*.23f,w*.96f,h*.32f);lineTo(w*.96f,h*.83f);quadraticTo(w*.96f,h*.91f,w*.88f,h*.91f);lineTo(w*.12f,h*.91f);quadraticTo(w*.04f,h*.91f,w*.04f,h*.83f);lineTo(w*.04f,h*.32f);quadraticTo(w*.04f,h*.23f,w*.12f,h*.23f);close()}
+                    outline(p);drawCircle(color,w*.22f,center=Offset(w*.50f,h*.57f),style=Stroke(st))
+                }
                 "mic"->{drawRoundRect(color,Offset(w*.35f,h*.06f),Size(w*.30f,h*.53f),androidx.compose.ui.geometry.CornerRadius(w*.15f),style=Stroke(st));drawArc(color,0f,180f,false,Offset(w*.20f,h*.25f),Size(w*.60f,h*.50f),style=Stroke(st,cap=StrokeCap.Round));line(.50f,.75f,.50f,.93f);line(.32f,.93f,.68f,.93f)}
                 "copy"->{drawRoundRect(color,Offset(w*.30f,h*.26f),Size(w*.57f,h*.65f),androidx.compose.ui.geometry.CornerRadius(w*.09f),style=Stroke(st));line(.14f,.72f,.14f,.09f);line(.14f,.09f,.70f,.09f)}
                 "speaker"->{outline(path(listOf(.10f to .37f,.30f to .37f,.52f to .15f,.52f to .85f,.30f to .63f,.10f to .63f),true));drawArc(color,-50f,100f,false,Offset(w*.37f,h*.24f),Size(w*.40f,h*.52f),style=Stroke(st,cap=StrokeCap.Round));drawArc(color,-49f,98f,false,Offset(w*.29f,h*.07f),Size(w*.65f,h*.86f),style=Stroke(st,cap=StrokeCap.Round))}
@@ -452,6 +495,9 @@ class MainActivity : ComponentActivity() {
                     IconButton(onClick={draft="";textResult=null},enabled=draft.isNotEmpty()&&!textBusy){
                         NavGlyph("close",if(draft.isNotEmpty())scheme.onSurfaceVariant else scheme.onSurfaceVariant.copy(alpha=.35f),Modifier.size(22.dp).semantics{contentDescription="清除"})
                     }
+                    IconButton(onClick={focus.clearFocus();keyboard?.hide();openPhoto()},enabled=!photoBusy){
+                        NavGlyph("camera",scheme.primary,Modifier.size(23.dp).semantics{contentDescription="拍照翻译"})
+                    }
                     IconButton(onClick={focus.clearFocus();keyboard?.hide();navigate("live")}){
                         NavGlyph("mic",scheme.primary,Modifier.size(23.dp).semantics{contentDescription="语音传译"})
                     }
@@ -476,6 +522,183 @@ class MainActivity : ComponentActivity() {
                         if(s.error.isNotBlank())Text(s.error,fontSize=12.sp,color=scheme.onSurfaceVariant)
                         Spacer(Modifier.height(4.dp))
                     }
+                }
+            }
+        }
+    }
+    private fun openPhoto(){
+        if(photoBusy)return
+        photoSessionId=if(recording||page=="live")current?.time else null
+        photoTime=System.currentTimeMillis()
+        photoSource="";photoOriginal="";photoResult=null;photoBitmap=null;photoConfidence=0;photoError=""
+        photoDialog=true
+    }
+    private fun launchCamera(){
+        if(photoBusy)return
+        val dir=java.io.File(cacheDir,"camera").apply{mkdirs()}
+        runCatching{
+            cameraFile?.delete()
+            val file=java.io.File.createTempFile("interpreter-",".jpg",dir)
+            cameraFile=file
+            takePhoto.launch(androidx.core.content.FileProvider.getUriForFile(this,"net.astrolab.interpreter.photos",file))
+        }.onFailure{cameraFile?.delete();cameraFile=null;photoError="无法打开相机。"}
+    }
+    private fun recognizePhoto(uri:android.net.Uri,file:java.io.File?){
+        if(photoBusy){file?.delete();return}
+        val lang=photoLanguage
+        photoBusy=true;photoError="";photoSource="";photoOriginal="";photoResult=null;photoBitmap=null;photoTime=System.currentTimeMillis()
+        photoWorker.execute{
+            val result=runCatching{photoOcr.recognize(uri,lang)}
+            file?.delete()
+            runOnUiThread{
+                photoBusy=false
+                result.onSuccess{r->
+                    photoBitmap=r.bitmap;photoSource=r.text;photoOriginal=r.text;photoConfidence=r.confidence
+                    if(r.text.isBlank())photoError="未识别到文字，请调整拍摄角度或光线。"
+                    else translatePhoto()
+                }.onFailure{photoError="无法识别照片中的文字，请重试。"}
+            }
+        }
+    }
+    private fun translatePhoto(){
+        if(photoBusy||photoSource.isBlank())return
+        val raw=photoSource.trim();val target=photoTarget;val time=photoTime
+        val original=photoOriginal.ifBlank{raw}
+        val confidence=photoConfidence
+        val config=api;val online=cloud&&networkConnected&&config.key.isNotBlank()
+        val glossary=terms
+        val context=photoSessionId?.let{sessionFor(it)?.items?.takeLast(8)}.orEmpty()
+        photoBusy=true;photoError="";photoResult=null
+        photoWorker.execute{
+            val result=runCatching{
+                val parts=photoTranslationChunks(raw)
+                val found=mutableListOf<Term>()
+                var missed=0;var fallback=false
+                val translated=parts.map{part->
+                    val lang=mixedCode(part,engine.detectText(part)).ifBlank{target}
+                    if(lang==target)part else{
+                        val a=if(online&&engine.hasInternetConnection())runCatching{
+                            engine.analyze(config,part,context,glossary,target,false,lang)
+                        }.getOrNull() else null
+                        if(a!=null){found.addAll(a.terms);a.translated}
+                        else{
+                            if(online)fallback=true
+                            // Use individual lines locally if a multilingual block exceeds the run limit.
+                            val local=runCatching{engine.offline(part,lang,target)}.getOrNull()
+                            if(!local.isNullOrBlank())local
+                            else part.lines().joinToString("\n"){line->
+                                val code=mixedCode(line,engine.detectText(line)).ifBlank{target}
+                                val value=runCatching{engine.offline(line,code,target)}.getOrNull()
+                                if(value.isNullOrBlank()){missed++; "[未译] "+line}else value
+                            }
+                        }
+                    }
+                }.joinToString("\n")
+                val err=when{
+                    missed>0->"部分文字尚未翻译，原文已保留。"
+                    fallback->"已使用离线译文。"
+                    else->""
+                }
+                photoSegment(raw,translated,mixedCode(raw,engine.detectText(raw)),target,time,err,original,confidence) to found
+            }
+            runOnUiThread{
+                photoBusy=false
+                result.onSuccess{(segment,found)->
+                    photoResult=segment
+                    if(online&&cloud&&api==config)mergeTerms(found)
+                }.onFailure{photoError="无法完成翻译，仍可保存识别文字。"}
+            }
+        }
+    }
+    private fun savePhotoToSession(){
+        if(photoBusy||finishing)return
+        val raw=photoSource.trim()
+        if(raw.isBlank())return
+        val item=photoResult?.takeIf{it.corrected==raw&&it.target==photoTarget}
+            ?:photoSegment(raw,"",mixedCode(raw,engine.detectText(raw)),photoTarget,photoTime,"原文已保存，可稍后整理。",photoOriginal.ifBlank{raw},photoConfidence)
+        val chosen=photoSessionId?.let{sessionFor(it)}
+        if(chosen!=null&&summaryBusy==chosen.time){photoError="会话正在生成纪要，请稍后加入。";return}
+        if(chosen!=null){
+            val pos=chosen.items.size
+            val updated=chosen.copy(items=chosen.items+item,summary="")
+            persist(updated)
+            if(current?.time==chosen.time){
+                current=updated
+                for(index in playbackOrder.mark(pos)){
+                    val ready=current?.items?.getOrNull(index)
+                    if(autoSpeak&&ready!=null&&ready.soundEvent.isBlank()&&!ready.photoInput&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
+                }
+            }
+        }else{
+            val now=maxOf(System.currentTimeMillis(),(sessions.maxOfOrNull{it.time}?:0L)+1L)
+            val session=Session("照片翻译",listOf(item),time=now)
+            persist(session)
+            if(page=="live"&&current==null&&!recording&&pending==0){
+                current=session;quickOnlySession=now;playbackOrder.clear();playbackOrder.mark(0)
+            }
+        }
+        photoDialog=false;photoBitmap=null;message=if(chosen!=null)"已加入会话。" else "已保存至记录。"
+    }
+    @Composable private fun PhotoPage(){
+        val scheme=MaterialTheme.colorScheme
+        var menu by remember{mutableStateOf(false)}
+        var targetMenu by remember{mutableStateOf(false)}
+        Dialog(onDismissRequest={if(!photoBusy){photoDialog=false;photoBitmap=null}},
+            properties=DialogProperties(usePlatformDefaultWidth=false,dismissOnBackPress=!photoBusy,dismissOnClickOutside=false)){
+            Surface(Modifier.fillMaxWidth().padding(horizontal=14.dp).heightIn(max=680.dp),shape=RoundedCornerShape(18.dp),color=scheme.background){
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
+                    Row(verticalAlignment=Alignment.CenterVertically){
+                        Text("拍照翻译",fontSize=23.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.weight(1f))
+                        IconButton(onClick={photoDialog=false;photoBitmap=null},enabled=!photoBusy){NavGlyph("close",scheme.onSurfaceVariant,Modifier.size(21.dp))}
+                    }
+                    Row(verticalAlignment=Alignment.CenterVertically){
+                        Box(Modifier.weight(1f)){
+                            TextButton(onClick={menu=true},enabled=!photoBusy){Text(if(photoLanguage=="auto")"自动识别" else languageName(photoLanguage))}
+                            DropdownMenu(expanded=menu,onDismissRequest={menu=false}){
+                                for(code in listOf("auto","zh","ru","en"))DropdownMenuItem(text={Text(if(code=="auto")"自动识别" else languageName(code))},onClick={photoLanguage=code;menu=false})
+                            }
+                        }
+                        Text("→",color=scheme.onSurfaceVariant)
+                        Box(Modifier.weight(1f),contentAlignment=Alignment.CenterEnd){
+                            TextButton(onClick={targetMenu=true},enabled=!photoBusy){Text(languageName(photoTarget))}
+                            DropdownMenu(expanded=targetMenu,onDismissRequest={targetMenu=false}){
+                                for(code in listOf("zh","ru","en"))DropdownMenuItem(text={Text(languageName(code))},onClick={photoTarget=code;photoResult=null;targetMenu=false})
+                            }
+                        }
+                    }
+                    Text(if(cloud&&networkConnected&&api.key.isNotBlank())"网络模式" else "本地模式",fontSize=12.sp,color=scheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)){
+                        Button(onClick={launchCamera()},enabled=!photoBusy,modifier=Modifier.weight(1f),shape=corner){Text("拍照")}
+                        OutlinedButton(onClick={runCatching{pickPhoto.launch("image/*")}.onFailure{photoError="无法打开照片。"}},enabled=!photoBusy,modifier=Modifier.weight(1f),shape=corner){Text("选取照片")}
+                    }
+                    photoBitmap?.let{img->Image(img.asImageBitmap(),contentDescription="所选照片",modifier=Modifier.fillMaxWidth().heightIn(max=190.dp).clip(corner),contentScale=ContentScale.Fit)}
+                    if(photoBusy)Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(9.dp)){
+                        CircularProgressIndicator(Modifier.size(16.dp),strokeWidth=2.dp)
+                        Text(if(photoSource.isBlank())"正在识别文字…" else "正在翻译…",fontSize=13.sp,color=scheme.onSurfaceVariant)
+                    }
+                    if(photoError.isNotBlank())Text(photoError,fontSize=13.sp,color=scheme.onSurfaceVariant)
+                    if(photoSource.isNotBlank()){
+                        Panel{
+                            Text("识别文字",fontSize=13.sp,color=scheme.onSurfaceVariant)
+                            if(photoConfidence in 0..59)Text("部分文字可能不准确，请核对原文。",fontSize=12.sp,color=scheme.onSurfaceVariant)
+                            BasicTextField(value=photoSource,onValueChange={photoSource=it;photoResult=null;photoError=""},
+                                enabled=!photoBusy,textStyle=TextStyle(fontSize=16.sp,lineHeight=24.sp,color=scheme.onSurface),
+                                modifier=Modifier.fillMaxWidth().semantics{contentDescription="识别文字"})
+                            HorizontalDivider(color=scheme.outline.copy(alpha=.5f))
+                            TextButton(onClick={translatePhoto()},enabled=!photoBusy&&photoSource.isNotBlank()){Text("翻译")}
+                        }
+                        photoResult?.let{r->Panel{
+                            Text("译文",fontSize=13.sp,color=scheme.onSurfaceVariant)
+                            SelectionContainer{Text(r.translated.ifBlank{"暂无译文"},fontSize=17.sp,lineHeight=25.sp,color=scheme.onSurface)}
+                            if(r.error.isNotBlank())Text(r.error,fontSize=12.sp,color=scheme.onSurfaceVariant)
+                            TextButton(onClick={copyText(r.translated)},enabled=r.translated.isNotBlank()){Text("复制")}
+                        }}
+                        Button(onClick={savePhotoToSession()},enabled=!photoBusy&&!finishing&&photoSource.isNotBlank(),
+                            modifier=Modifier.fillMaxWidth(),shape=corner){
+                            Text(if(photoSessionId!=null)"加入会话" else "保存记录")
+                        }
+                        Text("仅保存文字，不保留照片。",fontSize=12.sp,lineHeight=18.sp,color=scheme.onSurfaceVariant)
+                    }else if(!photoBusy)Text("可拍摄标识、表格或文件中的文字。",fontSize=13.sp,color=scheme.onSurfaceVariant)
                 }
             }
         }
@@ -599,7 +822,11 @@ class MainActivity : ComponentActivity() {
                 Text(java.text.SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(java.util.Date(s.startTime)),
                     fontSize=10.sp,letterSpacing=.25.sp,color=scheme.onSurfaceVariant.copy(alpha=.78f),
                     fontWeight=FontWeight.Medium)
-                if(s.typedInput)Text("键入",fontSize=10.sp,color=typedColor,fontWeight=FontWeight.Medium)
+                if(s.photoInput){
+                    NavGlyph("camera",scheme.onSurfaceVariant,Modifier.size(13.dp))
+                    Text("照片文字",fontSize=10.sp,color=scheme.onSurfaceVariant,fontWeight=FontWeight.Medium)
+                    if(s.photoConfidence in 0..59&&s.manualRevision==0)Text("待核对",fontSize=10.sp,color=scheme.onSurfaceVariant)
+                }else if(s.typedInput)Text("键入",fontSize=10.sp,color=typedColor,fontWeight=FontWeight.Medium)
             }
             if(s.soundEvent.isNotBlank()){
                 Text(soundEventText(s.soundEvent),fontSize=14.sp,fontWeight=FontWeight.Medium,color=scheme.onSurfaceVariant)
@@ -791,6 +1018,9 @@ class MainActivity : ComponentActivity() {
                             inner()
                         }
                     })
+                IconButton(onClick={openPhoto()},enabled=!photoBusy&&!finishing,modifier=Modifier.size(40.dp)){
+                    NavGlyph("camera",scheme.onSurfaceVariant,Modifier.size(21.dp).semantics{contentDescription="拍照翻译"})
+                }
                 IconButton(onClick={send()},enabled=canSend,
                     modifier=Modifier.size(44.dp).semantics{contentDescription="发送并翻译"}){
                     val ink=if(canSend)typedColor else scheme.onSurfaceVariant.copy(alpha=.40f)
@@ -941,7 +1171,7 @@ class MainActivity : ComponentActivity() {
                                                     current=session.copy(items=session.items+failed);saveCurrent()
                                                     for(index in playbackOrder.mark(pos)){
                                                         val ready=current?.items?.getOrNull(index)
-                                                        if(autoSpeak&&ready!=null&&ready.soundEvent.isBlank()&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
+                                                        if(autoSpeak&&ready!=null&&ready.soundEvent.isBlank()&&!ready.photoInput&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
                                                     }
                                                 }
                                             }
@@ -1038,7 +1268,7 @@ class MainActivity : ComponentActivity() {
         current=session.copy(items=session.items+event);saveCurrent()
         for(index in playbackOrder.mark(pos)){
             val ready=current?.items?.getOrNull(index)
-            if(autoSpeak&&ready!=null&&ready.soundEvent.isBlank()&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
+            if(autoSpeak&&ready!=null&&ready.soundEvent.isBlank()&&!ready.photoInput&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
         }
     }
     private fun enqueue(raw:String,language:String,id:Long,config:ApiConfig,online:Boolean,from:Long,until:Long,typedInput:Boolean=false) {
@@ -1077,7 +1307,7 @@ class MainActivity : ComponentActivity() {
                 pending=(pending-1).coerceAtLeast(0)
                 for(index in playbackOrder.mark(pos)){
                     val ready=current?.takeIf{it.time==id}?.items?.getOrNull(index)
-                    if(autoSpeak&&ready!=null&&ready.soundEvent.isBlank()&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
+                    if(autoSpeak&&ready!=null&&ready.soundEvent.isBlank()&&!ready.photoInput&&ready.translated.isNotBlank())speak(ready.translated,ready.target)
                 }
                 finishWhenReady()
             }
@@ -1466,6 +1696,8 @@ class MainActivity : ComponentActivity() {
             SettingsSection("离线使用",footer="请提前下载语言包，以便在没有网络连接时使用翻译。"){
                 SettingsRow("语音识别",value="已内置",subtitle="简体中文、英语、俄语")
                 SettingsDivider()
+                SettingsRow("照片文字识别",value="已内置",subtitle="简体中文、英语、俄语")
+                SettingsDivider()
                 Row(Modifier.fillMaxWidth().heightIn(min=48.dp).clickable(enabled=!downloading){
                     downloading=true;modelStatus="正在检查语言包…"
                     modelDownload.execute{
@@ -1488,9 +1720,11 @@ class MainActivity : ComponentActivity() {
                 SettingsRow("会话记录",value="本机存储")
                 SettingsDivider()
                 SettingsRow("录音",value="不保存")
+                SettingsDivider()
+                SettingsRow("照片原件",value="不存入会话")
             }
             SettingsSection("关于"){
-                SettingsRow("版本",value="0.6.14")
+                SettingsRow("版本",value="0.6.15")
                 SettingsDivider()
                 SettingsRow("GitHub",subtitle="EVGA2048/ATRL-Interpreter",onClick={
                     runCatching{startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
@@ -1526,6 +1760,13 @@ class MainActivity : ComponentActivity() {
             if(r==TextToSpeech.LANG_MISSING_DATA||r==TextToSpeech.LANG_NOT_SUPPORTED){message="系统缺少对应语音包";return}
         }
         t.speak(text,TextToSpeech.QUEUE_ADD,null,System.nanoTime().toString())
+    }
+    override fun onSaveInstanceState(outState:Bundle){
+        super.onSaveInstanceState(outState)
+        cameraFile?.let{outState.putString("cameraFile",it.absolutePath)}
+        photoSessionId?.let{outState.putLong("photoSessionId",it)}
+        outState.putString("photoLanguage",photoLanguage)
+        outState.putString("photoTarget",photoTarget)
     }
     override fun onDestroy(){
         connectivityCallback?.let{cb->runCatching{connectivityManager?.unregisterNetworkCallback(cb)}}

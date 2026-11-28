@@ -26,3 +26,9 @@ tar -xjf "$tmp/ced.tar.bz2" -C "$tmp" "$ced/model.int8.onnx" "$ced/class_labels_
 cp "$tmp/$ced/model.int8.onnx" app/src/main/assets/asr/ced-tiny.int8.onnx
 cp "$tmp/$ced/class_labels_indices.csv" app/src/main/assets/asr/ced-labels.csv
 shasum -a 256 -c scripts/models.sha256
+
+mkdir -p app/src/main/assets/ocr
+for lang in eng rus chi_sim; do
+    curl -fL "https://raw.githubusercontent.com/tesseract-ocr/tessdata/3.04.00/$lang.traineddata" -o "app/src/main/assets/ocr/$lang.traineddata"
+done
+shasum -a 256 -c scripts/ocr-models.sha256

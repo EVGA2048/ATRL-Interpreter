@@ -360,3 +360,24 @@ internal fun lowApiBalance(balance:AccountBalance?):Boolean {
         amount<limit
     }
 }
+
+/** Batch nearby lines while retaining line breaks and bounding requests. */
+internal fun photoTranslationChunks(raw:String,maxChars:Int=420):List<String>{
+    require(maxChars>0)
+    val result=mutableListOf<String>()
+    val block=StringBuilder()
+    for(line in raw.lineSequence().map{it.trim()}.filter{it.isNotBlank()}){
+        for(part in line.chunked(maxChars)){
+            if(block.isNotEmpty()&&block.length+part.length+1>maxChars){
+                result.add(block.toString());block.setLength(0)
+            }
+            if(block.isNotEmpty())block.append('\n')
+            block.append(part)
+        }
+    }
+    if(block.isNotEmpty())result.add(block.toString())
+    return result
+}
+internal fun photoSegment(raw:String,translated:String,language:String,target:String,time:Long,error:String="",original:String=raw,confidence:Int=-1):Segment=
+    Segment(original,corrected=raw,translated=translated,language=language,target=target,time=time,startTime=time,error=error,
+        manualRevision=if(original==raw)0 else 1,sourceBeforeEdit=original.takeIf{it!=raw},photoInput=true,photoConfidence=confidence)

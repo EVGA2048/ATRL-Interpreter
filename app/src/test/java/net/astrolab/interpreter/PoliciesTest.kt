@@ -248,4 +248,17 @@ class PoliciesTest {
         assertFalse(lowApiBalance(account("CNY" to "0","USD" to "10")))
         assertTrue(lowApiBalance(account("CNY" to "1","USD" to "0.2")))
     }
+    @Test fun photoRecordsKeepSourceAndRemainEligibleForSummary(){
+        val record=photoSegment("500 ₽","500卢布","ru","zh",120L,original="500 P",confidence=52)
+        assertTrue(record.photoInput)
+        assertFalse(record.typedInput)
+        assertEquals("500 P",record.raw)
+        assertEquals("500 ₽",record.corrected)
+        assertEquals(52,record.photoConfidence)
+        assertEquals(120L,record.startTime)
+        assertTrue(needsSessionSummary(Session("照片",listOf(record))))
+        assertEquals(listOf(record),summaryChunks(listOf(record)).flatten())
+        assertEquals(listOf("abc\ndef","ghi"),photoTranslationChunks("abc\ndef\nghi",7))
+        assertEquals(listOf("1234","5678","9"),photoTranslationChunks("123456789",4))
+    }
 }

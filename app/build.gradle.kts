@@ -11,8 +11,8 @@ android {
         minSdk = 26
         targetSdk = 35
         ndk { abiFilters += "arm64-v8a" }
-        versionCode = 23
-        versionName = "0.6.14"
+        versionCode = 24
+        versionName = "0.6.15"
     }
     buildFeatures { compose = true }
     compileOptions {
@@ -25,6 +25,7 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     implementation(files("libs/sherpa-onnx-2.0.3.aar"))
     implementation("com.google.mlkit:translate:17.0.3")
+    implementation("com.rmtheis:tess-two:9.0.0")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.compose.material3:material3")
