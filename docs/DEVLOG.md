@@ -1,5 +1,11 @@
 # Development log
 
+## 0.6.14
+
+- Query account balance once at startup when cloud mode and network are available; defer the first check until connectivity returns if necessary. Share balance across screens and allow manual refresh.
+- Show a small orange wallet warning for confirmed insufficient funds or available balance below CNY 5 / USD 1. Do not infer low funds from a failed request.
+- Rename the settings section to API balance.
+
 ## 0.6.13
 
 - Query DeepSeek account balance via the official read-only endpoint when opening settings or refreshing. Only use credentials configured for the official API host; respect local mode.

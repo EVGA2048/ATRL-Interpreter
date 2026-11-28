@@ -235,4 +235,17 @@ class PoliciesTest {
         assertEquals("$0.00",displayBalance("USD","0"))
         assertEquals("—",displayBalance("CNY","invalid"))
     }
+    @Test fun lowBalanceRequiresActualEvidence(){
+        fun account(vararg amounts:Pair<String,String>,available:Boolean=true)=AccountBalance(available,amounts.map{BalanceAmount(it.first,it.second,"0","0")})
+        assertFalse(lowApiBalance(null))
+        assertFalse(lowApiBalance(account()))
+        assertTrue(lowApiBalance(account(available=false)))
+        assertTrue(lowApiBalance(account("CNY" to "4.99")))
+        assertFalse(lowApiBalance(account("CNY" to "5.00")))
+        assertTrue(lowApiBalance(account("USD" to "0.99")))
+        assertFalse(lowApiBalance(account("USD" to "1.00")))
+        assertFalse(lowApiBalance(account("CNY" to "bad")))
+        assertFalse(lowApiBalance(account("CNY" to "0","USD" to "10")))
+        assertTrue(lowApiBalance(account("CNY" to "1","USD" to "0.2")))
+    }
 }

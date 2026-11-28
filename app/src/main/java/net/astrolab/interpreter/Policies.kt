@@ -348,3 +348,15 @@ internal fun displayBalance(currency:String,amount:String):String {
     val value=amount.toBigDecimalOrNull()?.setScale(2,java.math.RoundingMode.HALF_UP)?.toPlainString()?:return "—"
     return when(currency){"CNY"->"¥"+value;"USD"->"$"+value;else->"$currency $value"}
 }
+
+/** Warn on confirmed insufficient funds or when every returned balance is below its threshold. */
+internal fun lowApiBalance(balance:AccountBalance?):Boolean {
+    if(balance==null)return false
+    if(!balance.available)return true
+    if(balance.amounts.isEmpty())return false
+    return balance.amounts.all{item->
+        val amount=item.total.toBigDecimalOrNull()?:return@all false
+        val limit=when(item.currency){"CNY"->java.math.BigDecimal("5");"USD"->java.math.BigDecimal("1");else->return@all false}
+        amount<limit
+    }
+}

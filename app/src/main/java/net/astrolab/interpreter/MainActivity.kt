@@ -99,6 +99,15 @@ class MainActivity : ComponentActivity() {
     private lateinit var settings: ApiSettings
     private var api by mutableStateOf(ApiConfig())
     private var cloud by mutableStateOf(true)
+    private var balance by mutableStateOf<AccountBalance?>(null)
+    private var balanceError by mutableStateOf("")
+    private var balanceLoading by mutableStateOf(false)
+    private var balanceTime by mutableStateOf<Long?>(null)
+    private var balanceRefresh by mutableIntStateOf(0)
+    private var balanceDialog by mutableStateOf(false)
+    private val balanceSupported get()=supportsDeepSeekBalance(api.endpoint)
+    private val canQueryBalance get()=balanceSupported&&api.key.isNotBlank()&&cloud&&networkConnected
+
     private var networkConnected by mutableStateOf(false)
     private var connectivityManager:android.net.ConnectivityManager?=null
     private var connectivityCallback:android.net.ConnectivityManager.NetworkCallback?=null
@@ -169,6 +178,8 @@ class MainActivity : ComponentActivity() {
                 else lightColorScheme(primary=cobalt,background=Color(0xFFF5F5F7),surface=Color.White,surfaceVariant=Color(0xFFE9E9ED),onSurface=Color(0xFF17171A),onSurfaceVariant=Color(0xFF74747B),outline=Color(0xFFD7D7DB),secondary=cobalt)
             MaterialTheme(colorScheme=scheme,shapes=Shapes(small=corner,medium=corner,large=corner)){
                 Surface(Modifier.fillMaxSize(),color=scheme.background){
+                    BalanceMonitor()
+                    if(balanceDialog)BalanceDetails()
                     sentenceEdit?.let{request->key(request){SentenceEditDialog(request)}}
                     BackHandler(page !in listOf("text","live","notes","terms")){navigate(if(page=="detail")"notes" else previousPage)}
                     BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().imePadding()){
@@ -192,6 +203,7 @@ class MainActivity : ComponentActivity() {
                                 if(page=="settings"||page=="detail") TextButton(onClick={navigate(if(page=="detail")"notes" else previousPage)},contentPadding=PaddingValues(end=12.dp)){Text("‹ 返回",fontSize=16.sp)}
                                 Text(when(page){"text"->"翻译";"live"->"传译";"notes"->"记录";"terms"->"词库";"settings"->"设置";else->"会话"},fontSize=if(page=="detail"||page=="settings")23.sp else 32.sp,letterSpacing=(-.8).sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f))
                                 if(page=="live")TranslationFlipToggle()
+                                if(cloud&&balanceSupported&&lowApiBalance(balance)&&page in listOf("text","live","notes","terms"))BalanceWarningIcon()
                                 if(page=="text"||page=="live")ModeIndicator()
                                 if(page!="settings"&&page!="detail")IconButton(onClick={previousPage=page;navigate("settings")}){NavGlyph("settings",scheme.onSurface,Modifier.size(24.dp))}
                             }
@@ -279,6 +291,58 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+    @Composable private fun BalanceMonitor(){
+        // The composition lives at the app root, not inside the settings page.
+        val config=api
+        val allowed=canQueryBalance
+        var lastAttempt by remember(config){mutableIntStateOf(-1)}
+        LaunchedEffect(config){balance=null;balanceError="";balanceTime=null;balanceLoading=false}
+        LaunchedEffect(config,allowed,balanceRefresh){
+            if(!allowed||lastAttempt==balanceRefresh)return@LaunchedEffect
+            val attempt=balanceRefresh
+            balanceLoading=true;balanceError=""
+            try{
+                val result=withContext(Dispatchers.IO){engine.accountBalance(config)}
+                if(api==config&&canQueryBalance){
+                    balance=result;balanceTime=System.currentTimeMillis();lastAttempt=attempt
+                }
+            }catch(e:CancellationException){throw e}
+            catch(_:Exception){
+                if(api==config&&canQueryBalance){balanceError="无法查询余额";lastAttempt=attempt}
+            }finally{if(api==config)balanceLoading=false}
+        }
+    }
+    @Composable private fun BalanceWarningIcon(){
+        val orange=if(isSystemInDarkTheme())Color(0xFFFFB568) else Color(0xFFB85C08)
+        IconButton(onClick={balanceDialog=true},modifier=Modifier.size(36.dp).semantics{contentDescription="API 余额不足"}){
+            Canvas(Modifier.size(22.dp)){
+                val w=size.width;val h=size.height;val st=1.7.dp.toPx()
+                val line=Stroke(st,cap=StrokeCap.Round,join=androidx.compose.ui.graphics.StrokeJoin.Round)
+                // Wallet with a partly visible card and a small exclamation on the right.
+                val card=Path().apply{moveTo(w*.13f,h*.28f);lineTo(w*.69f,h*.08f);lineTo(w*.76f,h*.28f)}
+                drawPath(card,orange,style=line)
+                drawRoundRect(orange,topLeft=Offset(w*.10f,h*.27f),size=Size(w*.80f,h*.62f),
+                    cornerRadius=androidx.compose.ui.geometry.CornerRadius(w*.10f),style=line)
+                drawRoundRect(orange,topLeft=Offset(w*.55f,h*.45f),size=Size(w*.39f,h*.26f),
+                    cornerRadius=androidx.compose.ui.geometry.CornerRadius(w*.06f),style=line)
+                drawCircle(orange,w*.035f,center=Offset(w*.68f,h*.58f))
+                drawLine(orange,Offset(w*.31f,h*.40f),Offset(w*.31f,h*.57f),st,StrokeCap.Round)
+                drawCircle(orange,st*.50f,center=Offset(w*.31f,h*.70f))
+            }
+        }
+    }
+    @Composable private fun BalanceDetails(){
+        AlertDialog(onDismissRequest={balanceDialog=false},
+            title={Text("API 余额不足")},
+            text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+                balance?.amounts?.forEach{item->Text(displayBalance(item.currency,item.total),fontSize=24.sp,fontWeight=FontWeight.Medium)}
+                Text("请及时充值，以免影响联网翻译及会话纪要。")
+                balanceTime?.let{Text("上次更新 "+java.text.SimpleDateFormat("HH:mm",Locale.getDefault()).format(java.util.Date(it)),
+                    fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+            }},
+            confirmButton={TextButton(onClick={balanceDialog=false;previousPage=page;navigate("settings")}){Text("查看余额")}},
+            dismissButton={TextButton(onClick={balanceDialog=false}){Text("关闭")}})
     }
     @Composable private fun ModeIndicator(){
         var expanded by remember{mutableStateOf(false)}
@@ -1341,23 +1405,8 @@ class MainActivity : ComponentActivity() {
         var edit by remember{mutableStateOf(api)}
         var show by remember{mutableStateOf(false)}
         val focus=LocalFocusManager.current
-        val supported=supportsDeepSeekBalance(api.endpoint)
-        val canQuery=supported&&api.key.isNotBlank()&&cloud&&networkConnected
-        var balance by remember(api){mutableStateOf<AccountBalance?>(null)}
-        var balanceError by remember(api){mutableStateOf("")}
-        var balanceLoading by remember(api){mutableStateOf(false)}
-        var balanceTime by remember(api){mutableStateOf<Long?>(null)}
-        var refresh by remember{mutableIntStateOf(0)}
-        LaunchedEffect(api,canQuery,refresh){
-            if(!canQuery){balanceLoading=false;return@LaunchedEffect}
-            balanceLoading=true;balanceError=""
-            try{
-                val result=withContext(Dispatchers.IO){engine.accountBalance(api)}
-                balance=result;balanceTime=System.currentTimeMillis()
-            }catch(e:CancellationException){throw e}
-            catch(_:Exception){balanceError="无法查询余额"}
-            finally{balanceLoading=false}
-        }
+        val supported=balanceSupported
+        val canQuery=canQueryBalance
         Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(25.dp)){
             SettingsSection("网络",footer="启用网络模式可使用云端翻译、会话纪要和术语提取。语音识别不受网络连接影响。"){
                 Row(Modifier.fillMaxWidth().heightIn(min=52.dp).padding(horizontal=16.dp,vertical=6.dp),verticalAlignment=Alignment.CenterVertically){
@@ -1386,12 +1435,12 @@ class MainActivity : ComponentActivity() {
                     }.padding(horizontal=16.dp,vertical=14.dp))
             }
             if(supported){
-                SettingsSection("DeepSeek 账户",footer=when{
+                SettingsSection("API 余额",footer=when{
                     api.key.isBlank()->"保存 API Key 后可查询账户余额。"
                     !cloud->"启用网络模式后可查询余额。"
                     !networkConnected->"联网后更新余额。"
                     balanceError.isNotBlank()->"无法更新余额，请稍后重试。"
-                    balance?.available==false->"当前账户余额不足，API 调用可能受限。"
+                    lowApiBalance(balance)->"余额较低，请及时充值。"
                     balanceTime!=null->"上次更新 "+java.text.SimpleDateFormat("HH:mm",Locale.getDefault()).format(java.util.Date(balanceTime!!))
                     else->null
                 }){
@@ -1407,7 +1456,7 @@ class MainActivity : ComponentActivity() {
                         SettingsRow("赠金余额",value=displayBalance(item.currency,item.granted))
                     }
                     SettingsDivider()
-                    Row(Modifier.fillMaxWidth().heightIn(min=46.dp).clickable(enabled=canQuery&&!balanceLoading){refresh++}
+                    Row(Modifier.fillMaxWidth().heightIn(min=46.dp).clickable(enabled=canQuery&&!balanceLoading){balanceRefresh++}
                         .padding(horizontal=16.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically){
                         Text("刷新余额",fontSize=16.sp,color=if(canQuery)scheme.primary else scheme.onSurfaceVariant,modifier=Modifier.weight(1f))
                         if(balanceLoading)CircularProgressIndicator(Modifier.size(16.dp),strokeWidth=2.dp)
@@ -1441,7 +1490,7 @@ class MainActivity : ComponentActivity() {
                 SettingsRow("录音",value="不保存")
             }
             SettingsSection("关于"){
-                SettingsRow("版本",value="0.6.13")
+                SettingsRow("版本",value="0.6.14")
                 SettingsDivider()
                 SettingsRow("GitHub",subtitle="EVGA2048/ATRL-Interpreter",onClick={
                     runCatching{startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
